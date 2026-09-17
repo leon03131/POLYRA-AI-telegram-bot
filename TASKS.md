@@ -60,15 +60,28 @@
 - [x] tzdata добавлена (Windows ZoneInfo)
 - [x] tests: 19 pool-тестов (все правила ADR-005 + race + cancel) — 104 всего; ruff/mypy ✓
 
-## M5 — streaming + cancellation (NEXT)
+## M5 — streaming + cancellation  ✅ DONE (2026-09-18)
 
-- [ ] bot/streaming/draft.py (rich draft → message draft → throttled edit; throttle; sanitize)
-- [ ] services/generation.py + GenerationRegistry (cancel по (chat_id, draft_id))
-- [ ] provider_credentials (таблица + миграция 0004) + seed quota_policies (4/249999/19)
-- [ ] wiring: chat.py/photos.py → реальная генерация; stop.py → отмена
-- [ ] scripts/import_gemini_keys.py
-- [ ] tests: stream buffer, stop cancels, partial persist, photo flow
+- [x] bot/streaming/draft.py: DraftStreamer (rich→plain→edit fallback, throttle, sanitize, tail-режим)
+- [x] services/generation.py: GenerationService + GenerationRegistry + user_error_message
+- [x] provider_credentials + миграция 0004 + seed quota_policies (4/249999/19 для 3.8/3.7/3.6)
+- [x] credentials service (DB → env fallback), llm_factory (gemini pool / alibaba cached)
+- [x] wiring: chat/photos → реальная генерация; stop.py → cancellation по (chat,draft)
+- [x] AccessMiddleware refactor: сессия БД закрывается ДО хендлера (долгие генерации)
+- [x] scripts/import_gemini_keys.py (--file/--keys, --dry-run)
+- [x] tests: 16 draft + 13 generation + 3 wiring — 147 всего; ruff ✓ mypy ✓ (76 файлов)
 
-## M6..M12
+## M6 — context builder + compactor + titles (IN REVIEW)
+
+- [x] TokenBudgetManager (estimate chars/token, reserve output, safety margin, image=1032)
+- [x] context/builder.py (SYSTEM + memories + summary + recent raw; current — у вызывающего)
+- [x] context/compactor.py (gemini-3.5-flash-lite, structured JSON summary, 1 repair)
+- [x] chat_summaries таблица + миграция 0005 + ChatSummaryRepository + MessageRepository.list_all
+- [x] auto title: background TitleGenerator + sanitize_title (tool set_chat_title — в M8)
+- [x] integration: GenerationService (builder в _prepare, фон compaction/title), main.py wiring
+- [x] tests: test_context.py + test_compactor.py (recent preserved, budget, covered_until, repair)
+- [ ] прогон pytest (E2 не запускал по инструкции); ruff ✓ mypy ✓ (85 файлов)
+
+## M7..M12
 
 См. PLAN.md §5. Детализация добавляется перед стартом каждого milestone.

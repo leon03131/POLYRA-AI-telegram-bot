@@ -29,6 +29,14 @@ class Settings(BaseSettings):
         "если пользователь пишет по-русски. Будь точным и лаконичным."
     )
     recent_history_limit: int = 20
+    # context / compaction (M6)
+    context_keep_recent: int = 10
+    context_trigger_ratio: float = 0.7
+    compaction_min_segment: int = 6
+    summary_model: str = "gemini-3.5-flash-lite"
+    summary_thinking: str = "medium"
+    title_model: str = "gemini-3.5-flash-lite"
+    title_thinking: str = "low"
     photo_max_bytes: int = 15 * 1024 * 1024
     log_level: str = "INFO"
     session_token_ttl_seconds: int = 900

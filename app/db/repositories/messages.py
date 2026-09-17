@@ -46,6 +46,12 @@ class MessageRepository:
         result = await self._session.execute(stmt)
         return list(reversed(result.scalars().all()))
 
+    async def list_all(self, chat_id: uuid.UUID) -> list[Message]:
+        """Все сообщения чата в хронологическом порядке (ASC). Для compaction."""
+        stmt = select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at.asc())
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def update_status(self, message_id: uuid.UUID, status: str) -> None:
         """Обновить status сообщения (no-op, если сообщение не найдено)."""
         message = await self.get(message_id)

@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -24,6 +24,7 @@ from app.bot.streaming.draft import MESSAGE_LIMIT, DraftStreamer, new_draft_id
 from app.config import Settings
 from app.db.repositories import (
     ChatRepository,
+    ChatSummaryRepository,
     GenerationRunRepository,
     MessageRepository,
     UserSettingsRepository,
@@ -47,6 +48,7 @@ from app.services.chats import ChatService
 from app.services.llm_factory import LLMStreamFn
 
 if TYPE_CHECKING:
+    from app.context import ContextBuilder, ContextCompactor, TitleGenerator
     from app.db.models import Chat, Message, User, UserSettings
 
 logger = logging.getLogger(__name__)
@@ -125,6 +127,9 @@ class _PreparedGeneration:
     thinking: str | None
     system_prompt: str
     messages: list[dict[str, Any]]
+    needs_compaction: bool = False
+    chat_title: str | None = None
+    user_text: str = ""
 
 
 def user_error_message(exc: BaseException, model_display: str) -> str:
@@ -170,6 +175,13 @@ def resolve_model_and_thinking(
     return model_id, thinking
 
 
+def extract_user_text(parts: list[dict[str, Any]]) -> str:
+    """Склеенный текст text-parts текущего сообщения (для title/compaction)."""
+    return " ".join(
+        str(part.get("text") or "") for part in parts if part.get("type") == "text"
+    ).strip()
+
+
 def build_messages(
     *, history: list[Message], current_parts: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -203,12 +215,18 @@ class GenerationService:
         llm_stream: LLMStreamFn,
         settings: Settings,
         generation_registry: GenerationRegistry,
+        context_builder: ContextBuilder | None = None,
+        compactor: ContextCompactor | None = None,
+        title_generator: TitleGenerator | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._registry = registry
         self._llm_stream = llm_stream
         self._settings = settings
         self._generations = generation_registry
+        self._context_builder = context_builder
+        self._compactor = compactor
+        self._title_generator = title_generator
 
     async def generate(
         self,
@@ -279,8 +297,42 @@ class GenerationService:
             else:
                 await streamer.finalize()
                 await self._save_completed(prepared, outcome)
+                self._schedule_maintenance(prepared, outcome)
         finally:
             self._generations.pop(tg_chat_id, prepared.draft_id)
+
+    def _schedule_maintenance(self, prepared: _PreparedGeneration, outcome: StreamOutcome) -> None:
+        """Фон после успешного ответа: compaction и автоназвание нового чата."""
+        if self._compactor is not None and prepared.needs_compaction:
+            self._spawn_background(
+                self._compactor.maybe_compact(prepared.chat_id), label="compaction"
+            )
+        if (
+            self._title_generator is not None
+            and prepared.chat_title is None
+            and prepared.user_text
+            and outcome.text
+        ):
+            self._spawn_background(
+                self._title_generator.generate_and_set(
+                    prepared.chat_id, prepared.user_text, outcome.text
+                ),
+                label="title",
+            )
+
+    @staticmethod
+    def _spawn_background(coro: Coroutine[Any, Any, Any], *, label: str) -> None:
+        """Запустить фоновую задачу; ошибки — только в лог (никогда не роняют ответ)."""
+        task = asyncio.create_task(coro)
+
+        def _log_error(done: asyncio.Task[Any]) -> None:
+            if done.cancelled():
+                return
+            exc = done.exception()
+            if exc is not None:
+                logger.warning("фоновая задача %s завершилась ошибкой: %s", label, exc)
+
+        task.add_done_callback(_log_error)
 
     async def _consume(
         self,
@@ -353,12 +405,10 @@ class GenerationService:
 
             messages_repo = MessageRepository(session)
             # История — ДО текущего сообщения (current_parts передаются отдельно);
-            # берём с запасом x2 и режем: image-only сообщения выпадут в build_messages.
+            # берём с запасом x2: без builder режем ниже, с builder он сам выберет хвост.
             history = await messages_repo.list_recent(
                 chat_id, limit=self._settings.recent_history_limit * 2
             )
-            history = history[-self._settings.recent_history_limit :]
-            llm_messages = build_messages(history=history, current_parts=current_parts)
             await messages_repo.add_message(chat_id, "user", parts=current_parts)
             await ChatRepository(session).touch(chat_id)
 
@@ -389,6 +439,26 @@ class GenerationService:
                 )
                 return None
 
+            base_system_prompt = chat.system_prompt_override or self._settings.default_system_prompt
+            chat_title = chat.title
+            needs_compaction = False
+            if self._context_builder is None:
+                history = history[-self._settings.recent_history_limit :]
+                llm_messages = build_messages(history=history, current_parts=current_parts)
+                system_prompt = base_system_prompt
+            else:
+                summary_row = await ChatSummaryRepository(session).get_for_chat(chat_id)
+                built = self._context_builder.build(
+                    model=model_def,
+                    base_system_prompt=base_system_prompt,
+                    summary_json=summary_row.summary if summary_row is not None else None,
+                    memories=[],  # долговременную память подключит M7
+                    history=history,
+                )
+                llm_messages = [*built.messages, {"role": "user", "parts": current_parts}]
+                system_prompt = built.system_prompt
+                needs_compaction = built.needs_compaction
+
             draft_id = new_draft_id()
             run = await GenerationRunRepository(session).create(
                 chat_id=chat_id,
@@ -399,7 +469,6 @@ class GenerationService:
                 status="running",
                 draft_id=draft_id,
             )
-            system_prompt = chat.system_prompt_override or self._settings.default_system_prompt
             await session.commit()
         return _PreparedGeneration(
             chat_id=chat_id,
@@ -411,6 +480,9 @@ class GenerationService:
             thinking=thinking,
             system_prompt=system_prompt,
             messages=llm_messages,
+            needs_compaction=needs_compaction,
+            chat_title=chat_title,
+            user_text=extract_user_text(current_parts),
         )
 
     async def _save_completed(self, prepared: _PreparedGeneration, outcome: StreamOutcome) -> None:

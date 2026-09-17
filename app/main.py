@@ -5,6 +5,7 @@ import logging
 
 from app.bot.dispatcher import create_bot, create_dispatcher, setup_bot_commands
 from app.config import get_settings
+from app.context import ContextBuilder, ContextCompactor, TitleGenerator, TokenBudgetManager
 from app.db.session import create_engine_from_url, make_session_factory
 from app.llm.registry import default_registry
 from app.observability.logging import setup_logging
@@ -35,12 +36,34 @@ async def main() -> None:
         registry=registry,
     )
     generation_registry = GenerationRegistry()
+    context_builder = ContextBuilder(
+        TokenBudgetManager(),
+        keep_recent=settings.context_keep_recent,
+        trigger_ratio=settings.context_trigger_ratio,
+    )
+    compactor = ContextCompactor(
+        session_factory=session_factory,
+        llm_stream=llm_stream,
+        summary_model=settings.summary_model,
+        summary_thinking=settings.summary_thinking,
+        keep_recent=settings.context_keep_recent,
+        min_segment=settings.compaction_min_segment,
+    )
+    title_generator = TitleGenerator(
+        session_factory=session_factory,
+        llm_stream=llm_stream,
+        title_model=settings.title_model,
+        title_thinking=settings.title_thinking,
+    )
     generation_service = GenerationService(
         session_factory=session_factory,
         registry=registry,
         llm_stream=llm_stream,
         settings=settings,
         generation_registry=generation_registry,
+        context_builder=context_builder,
+        compactor=compactor,
+        title_generator=title_generator,
     )
     bot = create_bot(settings)
     dp = create_dispatcher(

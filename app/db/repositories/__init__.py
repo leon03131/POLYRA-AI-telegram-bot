@@ -5,6 +5,7 @@ from app.db.repositories.access import (
     ModelPermissionRepository,
     UserSettingsRepository,
 )
+from app.db.repositories.chat_summaries import ChatSummaryRepository
 from app.db.repositories.chats import ChatRepository
 from app.db.repositories.credentials import ProviderCredentialRepository
 from app.db.repositories.gemini import (
@@ -19,6 +20,7 @@ from app.db.repositories.users import UserRepository
 __all__ = [
     "AccessRepository",
     "ChatRepository",
+    "ChatSummaryRepository",
     "GeminiProjectRepository",
     "GenerationRunRepository",
     "MessageRepository",
