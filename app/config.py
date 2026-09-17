@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     summary_thinking: str = "medium"
     title_model: str = "gemini-3.5-flash-lite"
     title_thinking: str = "low"
+    # долговременная память (M7)
+    memory_retrieval_limit: int = 5
+    memory_extraction_min_chars: int = 200
+    memory_model: str = "gemini-3.5-flash-lite"
+    memory_thinking: str = "medium"
+    memory_dedup_threshold: float = 0.85
     photo_max_bytes: int = 15 * 1024 * 1024
     log_level: str = "INFO"
     session_token_ttl_seconds: int = 900

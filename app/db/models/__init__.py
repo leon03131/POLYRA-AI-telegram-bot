@@ -6,6 +6,7 @@ from app.db.models.chat_summary import ChatSummary
 from app.db.models.credential import ProviderCredential
 from app.db.models.gemini import GeminiProject, QuotaDailyUsage, QuotaMinuteUsage, QuotaPolicy
 from app.db.models.generation_run import GenerationRun
+from app.db.models.memory import Memory
 from app.db.models.message import Message, MessagePart
 from app.db.models.user import User
 
@@ -15,6 +16,7 @@ __all__ = [
     "ChatSummary",
     "GeminiProject",
     "GenerationRun",
+    "Memory",
     "Message",
     "MessagePart",
     "ProviderCredential",

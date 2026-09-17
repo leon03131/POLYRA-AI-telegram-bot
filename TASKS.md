@@ -71,7 +71,7 @@
 - [x] scripts/import_gemini_keys.py (--file/--keys, --dry-run)
 - [x] tests: 16 draft + 13 generation + 3 wiring — 147 всего; ruff ✓ mypy ✓ (76 файлов)
 
-## M6 — context builder + compactor + titles (IN REVIEW)
+## M6 — context builder + compactor + titles  ✅ DONE (2026-09-18)
 
 - [x] TokenBudgetManager (estimate chars/token, reserve output, safety margin, image=1032)
 - [x] context/builder.py (SYSTEM + memories + summary + recent raw; current — у вызывающего)
@@ -80,8 +80,18 @@
 - [x] auto title: background TitleGenerator + sanitize_title (tool set_chat_title — в M8)
 - [x] integration: GenerationService (builder в _prepare, фон compaction/title), main.py wiring
 - [x] tests: test_context.py + test_compactor.py (recent preserved, budget, covered_until, repair)
-- [ ] прогон pytest (E2 не запускал по инструкции); ruff ✓ mypy ✓ (85 файлов)
+- [x] прогон главным агентом: 184 теста ✓, ruff ✓, mypy ✓ (86 файлов), alembic head 0005 ✓
+- Исправлено при интеграции: str.format с JSON-скобками в title prompt (KeyError)
 
-## M7..M12
+## M7 — automatic memory (NEXT)
+
+- [ ] memories таблица + миграция 0006 (text/normalized/category/importance/source/embedding?)
+- [ ] memory/extractor.py (3.5-flash-lite MEDIUM, JSON, dedupe)
+- [ ] memory/retriever.py (PostgreSQL FTS fallback; pgvector — optional позже)
+- [ ] memory/deduplicator.py (normalize + near-dup Jaccard)
+- [ ] wiring в generation: retrieval в context, extraction в фоне
+- [ ] tests: extraction, dedup, deletion, disabled memory, изоляция по user_id
+
+## M8..M12
 
 См. PLAN.md §5. Детализация добавляется перед стартом каждого milestone.

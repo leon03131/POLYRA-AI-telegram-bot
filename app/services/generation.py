@@ -50,6 +50,7 @@ from app.services.llm_factory import LLMStreamFn
 if TYPE_CHECKING:
     from app.context import ContextBuilder, ContextCompactor, TitleGenerator
     from app.db.models import Chat, Message, User, UserSettings
+    from app.memory import MemoryExtractor, PostgresFtsRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,8 @@ class _PreparedGeneration:
     needs_compaction: bool = False
     chat_title: str | None = None
     user_text: str = ""
+    user_id: uuid.UUID | None = None
+    memory_extraction_enabled: bool = False
 
 
 def user_error_message(exc: BaseException, model_display: str) -> str:
@@ -218,6 +221,8 @@ class GenerationService:
         context_builder: ContextBuilder | None = None,
         compactor: ContextCompactor | None = None,
         title_generator: TitleGenerator | None = None,
+        memory_retriever: PostgresFtsRetriever | None = None,
+        memory_extractor: MemoryExtractor | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._registry = registry
@@ -227,6 +232,8 @@ class GenerationService:
         self._context_builder = context_builder
         self._compactor = compactor
         self._title_generator = title_generator
+        self._memory_retriever = memory_retriever
+        self._memory_extractor = memory_extractor
 
     async def generate(
         self,
@@ -302,7 +309,7 @@ class GenerationService:
             self._generations.pop(tg_chat_id, prepared.draft_id)
 
     def _schedule_maintenance(self, prepared: _PreparedGeneration, outcome: StreamOutcome) -> None:
-        """Фон после успешного ответа: compaction и автоназвание нового чата."""
+        """Фон после успешного ответа: compaction, автоназвание, память."""
         if self._compactor is not None and prepared.needs_compaction:
             self._spawn_background(
                 self._compactor.maybe_compact(prepared.chat_id), label="compaction"
@@ -318,6 +325,22 @@ class GenerationService:
                     prepared.chat_id, prepared.user_text, outcome.text
                 ),
                 label="title",
+            )
+        if (
+            self._memory_extractor is not None
+            and prepared.memory_extraction_enabled
+            and prepared.user_id is not None
+            and prepared.user_text
+            and outcome.text
+        ):
+            self._spawn_background(
+                self._memory_extractor.extract_and_store(
+                    user_id=prepared.user_id,
+                    chat_id=prepared.chat_id,
+                    user_text=prepared.user_text,
+                    assistant_text=outcome.text,
+                ),
+                label="memory_extraction",
             )
 
     @staticmethod
@@ -439,6 +462,23 @@ class GenerationService:
                 )
                 return None
 
+            user_text = extract_user_text(current_parts)
+            # chat override → user default; права доступа важнее обеих настроек
+            memory_enabled = bool(permissions.can_use_memory) and (
+                chat.memory_enabled
+                if chat.memory_enabled is not None
+                else user_settings.memory_enabled
+            )
+            memories: list[str] = []
+            if memory_enabled and self._memory_retriever is not None:
+                try:
+                    retrieved = await self._memory_retriever.retrieve(
+                        user.id, user_text, limit=self._settings.memory_retrieval_limit
+                    )
+                    memories = [memory.text for memory in retrieved]
+                except Exception:
+                    logger.warning("memory retrieval failed (user %s)", user.id, exc_info=True)
+
             base_system_prompt = chat.system_prompt_override or self._settings.default_system_prompt
             chat_title = chat.title
             needs_compaction = False
@@ -452,7 +492,7 @@ class GenerationService:
                     model=model_def,
                     base_system_prompt=base_system_prompt,
                     summary_json=summary_row.summary if summary_row is not None else None,
-                    memories=[],  # долговременную память подключит M7
+                    memories=memories,
                     history=history,
                 )
                 llm_messages = [*built.messages, {"role": "user", "parts": current_parts}]
@@ -482,7 +522,9 @@ class GenerationService:
             messages=llm_messages,
             needs_compaction=needs_compaction,
             chat_title=chat_title,
-            user_text=extract_user_text(current_parts),
+            user_text=user_text,
+            user_id=user.id,
+            memory_extraction_enabled=memory_enabled,
         )
 
     async def _save_completed(self, prepared: _PreparedGeneration, outcome: StreamOutcome) -> None:

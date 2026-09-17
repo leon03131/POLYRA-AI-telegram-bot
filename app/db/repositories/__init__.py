@@ -14,6 +14,7 @@ from app.db.repositories.gemini import (
     QuotaUsageRepository,
 )
 from app.db.repositories.generation_runs import GenerationRunRepository
+from app.db.repositories.memories import MemoryRepository
 from app.db.repositories.messages import MessageRepository
 from app.db.repositories.users import UserRepository
 
@@ -23,6 +24,7 @@ __all__ = [
     "ChatSummaryRepository",
     "GeminiProjectRepository",
     "GenerationRunRepository",
+    "MemoryRepository",
     "MessageRepository",
     "ModelPermissionRepository",
     "ProviderCredentialRepository",
