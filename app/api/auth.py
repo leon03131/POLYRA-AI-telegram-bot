@@ -70,9 +70,7 @@ def validate_init_data(
     except ValueError as exc:
         raise ValueError("auth_date is not an integer") from exc
     current = _as_aware_utc(now) if now is not None else datetime.now(UTC)
-    age = (current - datetime.fromtimestamp(auth_date, UTC)).total_seconds()
-    if age > max_age_seconds:
-        raise ValueError("init_data is stale")
+    _check_auth_date(auth_date, current, max_age_seconds)
 
     user_raw = data.get("user")
     if user_raw is not None:
@@ -83,12 +81,26 @@ def validate_init_data(
     return data
 
 
+def _check_auth_date(auth_date: int, now: datetime, max_age_seconds: int) -> None:
+    """Свежесть initData: не старше max_age и не из будущего (допуск 60 с)."""
+    age = (now - datetime.fromtimestamp(auth_date, UTC)).total_seconds()
+    if age > max_age_seconds:
+        raise ValueError("init_data is stale")
+    if age < -60:
+        raise ValueError("auth_date is in the future")
+
+
 def _b64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 
 def _b64url_decode(data: str) -> bytes:
     return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+
+
+def _signing_key(secret: str) -> bytes:
+    """Отдельный ключ подписи сессий (не переиспользуем master key напрямую)."""
+    return hmac.new(secret.encode(), b"aibot-session-signing-v1", digestmod=hashlib.sha256).digest()
 
 
 def create_session_token(telegram_user_id: int, *, ttl_seconds: int, secret: str) -> str:
@@ -98,7 +110,7 @@ def create_session_token(telegram_user_id: int, *, ttl_seconds: int, secret: str
     expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
     payload = {"sub": str(telegram_user_id), "exp": int(expires_at.timestamp())}
     body = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    signature = hmac.new(secret.encode(), body.encode("ascii"), digestmod=hashlib.sha256)
+    signature = hmac.new(_signing_key(secret), body.encode("ascii"), digestmod=hashlib.sha256)
     return f"{body}.{signature.hexdigest()}"
 
 
@@ -112,7 +124,7 @@ def verify_session_token(token: str, *, secret: str, now: datetime | None = None
     if len(parts) != 2:
         raise ValueError("malformed session token")
     body, signature = parts
-    expected = hmac.new(secret.encode(), body.encode("ascii"), digestmod=hashlib.sha256)
+    expected = hmac.new(_signing_key(secret), body.encode("ascii"), digestmod=hashlib.sha256)
     if not hmac.compare_digest(expected.hexdigest(), signature):
         raise ValueError("invalid signature")
     try:

@@ -18,3 +18,11 @@
 7. **aiogram docs хостятся под /dev-3.x/** — ключевые методы сверены с git-тегом v3.31.0.
 8. **Kimi K3 Max Output=1M на странице модели** — подозрительно; max_tokens не передавать
    без необходимости, уточнить probe.
+9. **SSRF: DNS rebinding / TOCTOU** — resolve-then-connect без pinning IP (security review
+   2026-09-18, medium, принятый риск). Усиление позже: connect на проверенный IP с Host/SNI
+   или egress-прокси. Mitigation уже есть: per-redirect проверки, 2 МБ cap, таймауты.
+10. **Owner id зашит в default config** (795063564) — per ТЗ; смена owner в проде требует
+    env OWNER_TELEGRAM_ID + ручного снятия is_owner у прежнего (is_owner не отзывается
+    автоматически).
+11. **Rate limits Telegram draft updates не документированы** — throttle 1/сек + 429 backoff;
+    подобрать эмпирически на живом боте.

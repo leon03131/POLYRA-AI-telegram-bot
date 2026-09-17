@@ -70,6 +70,7 @@ class ActiveGeneration:
     draft_id: int
     tg_chat_id: int
     chat_id: uuid.UUID
+    user_id: uuid.UUID | None = None
 
 
 class GenerationRegistry:
@@ -96,6 +97,10 @@ class GenerationRegistry:
     def find_by_draft(self, tg_chat_id: int, draft_id: int) -> ActiveGeneration | None:
         """Найти генерацию по паре (tg_chat_id, draft_id)."""
         return self._by_draft.get((tg_chat_id, draft_id))
+
+    def count_active_for_user(self, user_id: uuid.UUID) -> int:
+        """Число активных генераций пользователя (для max_concurrent_generations)."""
+        return sum(1 for gen in self._by_draft.values() if gen.user_id == user_id)
 
     async def stop(self, tg_chat_id: int, draft_id: int) -> bool:
         """Запросить отмену (выставить cancellation); True, если генерация найдена."""
@@ -336,6 +341,7 @@ class GenerationService:
                 draft_id=prepared.draft_id,
                 tg_chat_id=tg_chat_id,
                 chat_id=prepared.chat_id,
+                user_id=user.id,
             )
         )
         try:
@@ -623,6 +629,41 @@ class GenerationService:
             finish_reason=finish_reason,
         )
 
+    async def _check_user_limits(
+        self,
+        session: AsyncSession,
+        bot: Bot,
+        tg_chat_id: int,
+        user: User,
+        permissions: EffectivePermissions,
+    ) -> bool:
+        """Проверить per-user лимиты гранта. True — отказ уже отправлен пользователю."""
+        day_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        runs_repo = GenerationRunRepository(session)
+        if permissions.requests_per_day is not None:
+            today_count = await runs_repo.count_since(user.id, since=day_start)
+            if today_count >= permissions.requests_per_day:
+                await session.commit()
+                await bot.send_message(
+                    tg_chat_id, "⛔ Дневной лимит запросов исчерпан. Попробуйте завтра."
+                )
+                return True
+        if permissions.token_limit is not None:
+            tokens_today = await runs_repo.tokens_since(user.id, since=day_start)
+            if tokens_today >= permissions.token_limit:
+                await session.commit()
+                await bot.send_message(
+                    tg_chat_id, "⛔ Дневной лимит токенов исчерпан. Попробуйте завтра."
+                )
+                return True
+        if self._generations.count_active_for_user(user.id) >= max(
+            permissions.max_concurrent_generations, 1
+        ):
+            await session.commit()
+            await bot.send_message(tg_chat_id, _BUSY_MESSAGE)
+            return True
+        return False
+
     async def _prepare(
         self,
         *,
@@ -676,6 +717,13 @@ class GenerationService:
                     f"Модели с поддержкой изображений: "
                     f"{', '.join(image_models) if image_models else 'нет доступных'}.",
                 )
+                return None
+
+            # Per-user лимиты гранта (server-side; скрытая кнопка ≠ защита)
+            limit_denial = await self._check_user_limits(
+                session, bot, tg_chat_id, user, permissions
+            )
+            if limit_denial:
                 return None
 
             user_text = extract_user_text(current_parts)

@@ -582,7 +582,8 @@ class TestOpenUrl:
             _call("open_url", {"url": "https://example.com"}), _context()
         )
         assert execution.status == "ok"
-        assert execution.result.content.startswith("URL: https://example.com")
+        assert "НЕДОВЕРЕННОГО ВЕБ-КОНТЕНТА" in execution.result.content
+        assert "URL: https://example.com" in execution.result.content
         assert "hello page" in execution.result.content
 
     async def test_ssrf_blocked(self, monkeypatch: pytest.MonkeyPatch) -> None:

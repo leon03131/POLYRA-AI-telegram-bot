@@ -1,0 +1,6 @@
+# Telegram AI Assistant - reverse proxy with automatic HTTPS.
+# DOMAIN is passed from .env via docker-compose (caddy profile).
+
+{$DOMAIN} {
+	reverse_proxy app:8080
+}

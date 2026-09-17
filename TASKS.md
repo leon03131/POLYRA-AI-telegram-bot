@@ -83,7 +83,54 @@
 - [x] прогон главным агентом: 184 теста ✓, ruff ✓, mypy ✓ (86 файлов), alembic head 0005 ✓
 - Исправлено при интеграции: str.format с JSON-скобками в title prompt (KeyError)
 
-## M7 — automatic memory (NEXT)
+## M7 — automatic memory  ✅ DONE (2026-09-18)
+
+- [x] memories таблица + миграция 0006; MemoryRepository (FTS, изоляция по user_id)
+- [x] memory/{normalizer,deduplicator,retriever,extractor}: 3.5-flash-lite MEDIUM,
+      exact/near-dup dedup, FTS fallback на топ-важные, Protocol для будущего pgvector
+- [x] wiring в generation (retrieval в builder, extraction фоном); флаги can_use_memory
+- [x] tests: 24 memory-теста — 211 всего; ruff/mypy ✓
+
+## M8 — tool engine + web_search + open_url  ✅ DONE (2026-09-18)
+
+- [x] llm/tools: registry/runner/schemas (своя JSON Schema валидация), 5 builtin tools
+- [x] search/: base + Serper/Brave/SerpApi AIO/Jina/Playwright(experimental), manager
+      с fallback, modes normal/ai_overview/auto; fetcher с SSRF (redirect-into-private блок)
+- [x] search_backend_configs + tool_calls + миграция 0007; ToolCallRecord + репозиторий
+- [x] Tool loop в GenerationService (max 8 итераций, per-chat cancel работает),
+      citations «Источники» в финале; tool parts в истории сообщений
+- [x] tests: 28 search + 12 ssrf + 30+ tools + 6 tool-loop — 307 всего; ruff/mypy ✓
+
+## M9/M10 — Mini App + Admin panel  ✅ DONE (2026-09-18)
+
+- [x] FastAPI backend: initData auth (HMAC + auth_date), HMAC session tokens,
+      deps (401/403), все роуты по docs/API.md, /health, static miniapp
+- [x] Модели system_settings + audit_log (миграция 0008); services/admin.py с аудитом
+- [x] miniapp/: React+TS+Vite (HashRouter, theme vars, BackButton), user UI
+      (Home/Chats/ChatSettings/Settings/Memory) + admin UI (Dashboard/Users/Gemini Pool/
+      Providers/Search/System/Audit); npm build ✓ (264 kB JS)
+- [x] main.py: bot polling + uvicorn Mini App API в одном процессе
+- [x] tests: api_auth (initData valid/invalid/stale, session tokens) + api smoke — 334 всего
+
+## M11-M12 — observability + security review + Docker + README  ✅ DONE (2026-09-18)
+
+- [x] scripts/smoke_providers.py (Gemini: text/thinking levels/image/error body; Alibaba:
+      text/thinking acceptance/FC/image/Kimi DTL raw; отчёт JSON + рекомендации UI уровней)
+- [x] Security review (0 critical/high; 4 medium → все исправлены: redaction в форматтере
+      и extra-поля, per-user лимиты enforced, auth_date из будущего отклонён,
+      session-signing key отделён от master, фото size после скачивания, open_url
+      untrusted-маркеры + system prompt)
+- [x] Dockerfile (multi-stage node→python, non-root, alembic upgrade head в CMD),
+      docker-compose.yml (app+postgres+caddy profile), Caddyfile, .dockerignore
+- [x] README.md (deploy, BotFather, env, dev, безопасность)
+- [x] Финальные гейты: 334 теста ✓, ruff ✓, mypy strict ✓ (145 файлов), alembic 0008 ✓
+- Осталось на владельце: живой запуск с ключами (smoke_providers), `alembic upgrade head`
+  против продовой PostgreSQL, BotFather Main Mini App, наблюдение за rate limits драфтов.
+
+## Бэклог (future, не scope)
+
+- audio/video/documents parts; export чатов; pgvector embeddings; webhook режим;
+  Playwright search (experimental); Kimi Dynamic Tool Loading (после probe).
 
 - [ ] memories таблица + миграция 0006 (text/normalized/category/importance/source/embedding?)
 - [ ] memory/extractor.py (3.5-flash-lite MEDIUM, JSON, dedupe)

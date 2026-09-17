@@ -40,7 +40,11 @@ class RedactionFilter(logging.Filter):
 
 
 class _LineFormatter(logging.Formatter):
-    """One-line formatter that appends `extra` fields as key=value pairs."""
+    """One-line formatter: extras как key=value + redaction ПОСЛЕДНЕЙ строки.
+
+    Redact на уровне финальной строки покрывает и traceback (exc_info),
+    и extra-поля — фильтр на record этого не гарантирует.
+    """
 
     def format(self, record: logging.LogRecord) -> str:
         line = super().format(record)
@@ -51,7 +55,7 @@ class _LineFormatter(logging.Formatter):
         ]
         if extras:
             line = f"{line} {' '.join(extras)}"
-        return line
+        return redact_text(line)
 
 
 def setup_logging(level: str) -> None:

@@ -1,0 +1,70 @@
+# Telegram AI Assistant - production stack.
+#
+#   docker compose up -d --build          # postgres + app (bot + Mini App API)
+#   docker compose --profile caddy up -d  # + Caddy reverse proxy (auto HTTPS)
+#
+# Variables below are interpolated from .env (compose reads it automatically).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aibot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aibot}
+      POSTGRES_DB: ${POSTGRES_DB:-aibot}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # The DB port is NOT published: PostgreSQL stays on the internal network.
+    # For local tools (psql, IDE) uncomment:
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Inside the compose network the DB host is the service name "postgres".
+      # This overrides DATABASE_URL from .env (which points to localhost for dev).
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aibot}:${POSTGRES_PASSWORD:-aibot}@postgres:5432/${POSTGRES_DB:-aibot}
+      # FastAPI must listen on all interfaces inside the container.
+      API_HOST: 0.0.0.0
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles: ["caddy"]
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env, e.g. DOMAIN=bot.example.com}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

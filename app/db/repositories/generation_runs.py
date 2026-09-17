@@ -4,6 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import GenerationRun
@@ -63,3 +64,24 @@ class GenerationRunRepository:
         if error_code is not None:
             run.error_code = error_code
         await self._session.flush()
+
+    async def count_since(self, user_id: uuid.UUID, *, since: datetime) -> int:
+        """Число запусков пользователя с момента `since` (для requests/day)."""
+        stmt = (
+            select(func.count())
+            .select_from(GenerationRun)
+            .where(GenerationRun.user_id == user_id, GenerationRun.started_at >= since)
+        )
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())
+
+    async def tokens_since(self, user_id: uuid.UUID, *, since: datetime) -> int:
+        """Сумма input+output токенов пользователя с момента `since` (для token limit)."""
+        total_tokens = func.coalesce(GenerationRun.input_tokens, 0) + func.coalesce(
+            GenerationRun.output_tokens, 0
+        )
+        stmt = select(func.coalesce(func.sum(total_tokens), 0)).where(
+            GenerationRun.user_id == user_id, GenerationRun.started_at >= since
+        )
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())

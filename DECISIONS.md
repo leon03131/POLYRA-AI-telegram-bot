@@ -73,6 +73,14 @@ GeminiProvider получает api_key через `request.metadata["api_key"]`
 по ключу) — так M4 pool может повторять ТОТ ЖЕ запрос с другим проектом/ключом.
 Ротация только если не эмитнуто ни одного события (partial stream не перезапускаем).
 
+## ADR-016 | 2026-09-18 | accepted (security review M12)
+Session tokens подписываются производным ключом `HMAC(master, "aibot-session-signing-v1")`,
+не сырым master key (разделение с Fernet-ключами). initData: отклонять auth_date из
+будущего (допуск 60 с). Redaction логов — на уровне финальной строки форматтера
+(покрывает traceback и extra). Per-user лимиты гранта (requests/day, token limit,
+max concurrent) enforce'ятся в GenerationService._prepare. open_url контент маркируется
+НЕДОВЕРЕННЫМ + system prompt запрещает выполнять инструкции из него.
+
 ## ADR-012 | 2026-09-18 | accepted
 Web content — untrusted data (prompt-injection safe). open_url: только http/https,
 DNS resolve + SSRF checks после каждого redirect, блок private/loopback/link-local/
