@@ -1,0 +1,230 @@
+// TS-типы по docs/API.md (M9/M10). Все поля — точно по контракту backend.
+
+// ---------- Auth ----------
+
+export interface TelegramUser {
+  telegram_user_id: number;
+  username: string | null;
+  first_name: string | null;
+}
+
+export interface AuthResponse {
+  session_token: string;
+  expires_in: number;
+  user: TelegramUser;
+  is_owner: boolean;
+}
+
+// ---------- User API ----------
+
+export interface Permissions {
+  allowed_models: string[] | null;
+  can_use_web_search: boolean;
+  can_use_memory: boolean;
+  max_concurrent_generations: number;
+  requests_per_day: number | null;
+  token_limit: number | null;
+}
+
+export interface MeResponse {
+  user: TelegramUser;
+  is_owner: boolean;
+  permissions: Permissions;
+}
+
+export interface ModelInfo {
+  model_id: string;
+  display_name: string;
+  provider: string;
+  supports_images: boolean;
+  thinking_modes: string[];
+  default_thinking: string | null;
+}
+
+export interface ModelsResponse {
+  models: ModelInfo[];
+}
+
+export type WebMode = "off" | "auto" | "on";
+
+export interface Chat {
+  id: number;
+  title: string | null;
+  model_id: string | null;
+  thinking_setting: string | null;
+  web_mode: string | null;
+  memory_enabled: boolean | null;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+  is_current: boolean;
+}
+
+export interface ChatsResponse {
+  chats: Chat[];
+}
+
+/** PATCH /api/chats/{id}: null/отсутствие = inherit от user defaults. */
+export interface ChatPatch {
+  title?: string | null;
+  model_id?: string | null;
+  thinking_setting?: string | null;
+  web_mode?: string | null;
+  memory_enabled?: boolean | null;
+  system_prompt_override?: string | null;
+}
+
+export interface UserSettings {
+  default_model_id: string | null;
+  default_thinking: string | null;
+  web_mode: WebMode;
+  memory_enabled: boolean;
+}
+
+export interface SettingsPatch {
+  default_model_id?: string | null;
+  default_thinking?: string | null;
+  web_mode?: WebMode;
+  memory_enabled?: boolean;
+}
+
+export interface MemoryItem {
+  id: number;
+  text: string;
+  category: string;
+  importance: number;
+  updated_at: string;
+  last_used_at: string | null;
+}
+
+export interface MemoriesResponse {
+  memories: MemoryItem[];
+}
+
+export interface MemoryPatch {
+  text?: string;
+  category?: string;
+  importance?: number;
+}
+
+// ---------- Admin API ----------
+
+export interface AccessGrant {
+  status: string;
+  expires_at: string | null;
+  requests_per_day: number | null;
+  token_limit: number | null;
+  max_concurrent_generations: number | null;
+  can_use_web_search: boolean;
+  can_use_memory: boolean;
+}
+
+export interface AdminUser {
+  id: number;
+  telegram_user_id: number;
+  username: string | null;
+  first_name: string | null;
+  status: string;
+  is_owner: boolean;
+  first_seen_at: string;
+  last_seen_at: string;
+  grant: AccessGrant | null;
+  allowed_models: string[] | null;
+}
+
+export interface AdminUsersResponse {
+  users: AdminUser[];
+}
+
+export interface GrantBody {
+  telegram_user_id: number;
+  expires_at: string | null;
+  requests_per_day?: number | null;
+  token_limit?: number | null;
+  max_concurrent_generations?: number | null;
+  can_use_web_search?: boolean;
+  can_use_memory?: boolean;
+  note?: string;
+}
+
+export interface GeminiProject {
+  id: number;
+  name: string;
+  key_hint: string;
+  enabled: boolean;
+  health_status: string;
+  rotation_order: number;
+  cooldown_until: string | null;
+  last_success_at: string | null;
+  last_error_code: string | null;
+  last_error_message: string | null;
+}
+
+export interface GeminiProjectsResponse {
+  projects: GeminiProject[];
+}
+
+export interface GeminiQuota {
+  model_id: string;
+  rpm: number | null;
+  tpm: number | null;
+  rpd: number | null;
+}
+
+export interface GeminiQuotasResponse {
+  quotas: GeminiQuota[];
+}
+
+export interface AlibabaStatus {
+  configured: boolean;
+  key_hint: string | null;
+  base_url: string;
+  enabled: boolean;
+}
+
+export interface SearchBackend {
+  backend_id: string;
+  enabled: boolean;
+  priority: number;
+  key_hint: string | null;
+  health_status: string;
+  last_error: string | null;
+}
+
+export interface SearchBackendsResponse {
+  backends: SearchBackend[];
+}
+
+export interface SystemSettings {
+  default_model: string | null;
+  default_thinking: string | null;
+  default_system_prompt: string | null;
+  max_tool_iterations: number;
+  context_keep_recent: number;
+  context_trigger_ratio: number;
+  memory_retrieval_limit: number;
+}
+
+export interface AdminStats {
+  users_total: number;
+  users_active_7d: number;
+  generations_today: number;
+  generations_by_status: Record<string, number>;
+  tokens_today: { input: number; output: number };
+  gemini_projects: { total: number; enabled: number; healthy: number };
+  tool_calls_today: number;
+}
+
+export interface AuditEntry {
+  id: number;
+  actor_telegram_id: number;
+  action: string;
+  target_type: string;
+  target_id: string;
+  metadata: unknown;
+  created_at: string;
+}
+
+export interface AuditResponse {
+  entries: AuditEntry[];
+}

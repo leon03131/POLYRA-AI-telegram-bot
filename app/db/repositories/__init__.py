@@ -5,6 +5,7 @@ from app.db.repositories.access import (
     ModelPermissionRepository,
     UserSettingsRepository,
 )
+from app.db.repositories.audit_logs import AuditLogRepository
 from app.db.repositories.chat_summaries import ChatSummaryRepository
 from app.db.repositories.chats import ChatRepository
 from app.db.repositories.credentials import ProviderCredentialRepository
@@ -17,11 +18,13 @@ from app.db.repositories.generation_runs import GenerationRunRepository
 from app.db.repositories.memories import MemoryRepository
 from app.db.repositories.messages import MessageRepository
 from app.db.repositories.search_configs import SearchConfigRepository
+from app.db.repositories.system_settings import SystemSettingRepository
 from app.db.repositories.tool_calls import ToolCallRepository
 from app.db.repositories.users import UserRepository
 
 __all__ = [
     "AccessRepository",
+    "AuditLogRepository",
     "ChatRepository",
     "ChatSummaryRepository",
     "GeminiProjectRepository",
@@ -33,6 +36,7 @@ __all__ = [
     "QuotaPolicyRepository",
     "QuotaUsageRepository",
     "SearchConfigRepository",
+    "SystemSettingRepository",
     "ToolCallRepository",
     "UserRepository",
     "UserSettingsRepository",

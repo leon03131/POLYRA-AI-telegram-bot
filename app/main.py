@@ -3,6 +3,9 @@
 import asyncio
 import logging
 
+import uvicorn
+
+from app.api.app import create_app
 from app.bot.dispatcher import create_bot, create_dispatcher, setup_bot_commands
 from app.config import get_settings
 from app.context import ContextBuilder, ContextCompactor, TitleGenerator, TokenBudgetManager
@@ -90,11 +93,29 @@ async def main() -> None:
         generation_service=generation_service,
         generation_registry=generation_registry,
     )
+    api = create_app(
+        settings=settings,
+        session_factory=session_factory,
+        crypto=crypto,
+        registry=registry,
+    )
+    uvicorn_config = uvicorn.Config(
+        api,
+        host=settings.api_host,
+        port=settings.api_port,
+        log_level=settings.log_level.lower(),
+        access_log=False,
+    )
+    uvicorn_server = uvicorn.Server(uvicorn_config)
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         await setup_bot_commands(bot)
-        logger.info("bot started (long polling)")
-        await dp.start_polling(bot)
+        logger.info(
+            "bot started (long polling); mini app api on %s:%s",
+            settings.api_host,
+            settings.api_port,
+        )
+        await asyncio.gather(dp.start_polling(bot), uvicorn_server.serve())
     finally:
         await bot.session.close()
         await engine.dispose()

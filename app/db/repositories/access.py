@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AccessGrant, UserModelPermission, UserSettings
@@ -92,6 +92,12 @@ class ModelPermissionRepository:
             permission.allowed = allowed
         await self._session.flush()
         return permission
+
+    async def clear_for_user(self, user_id: uuid.UUID) -> None:
+        """Удалить все записи разрешений пользователя (→ None = без ограничений)."""
+        stmt = delete(UserModelPermission).where(UserModelPermission.user_id == user_id)
+        await self._session.execute(stmt)
+        await self._session.flush()
 
 
 class UserSettingsRepository:

@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     max_tool_iterations: int = 8  # лимит раундов tool-calling loop
     log_level: str = "INFO"
     session_token_ttl_seconds: int = 900
+    # Mini App API (M9/M10)
+    api_host: str = "127.0.0.1"
+    api_port: int = 8080
+    miniapp_dist: str = "miniapp/dist"
 
     def validate_for_runtime(self) -> list[str]:
         """Return names of env vars that are required for bot startup but missing."""
