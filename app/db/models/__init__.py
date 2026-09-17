@@ -2,6 +2,7 @@
 
 from app.db.models.access import AccessGrant, UserModelPermission, UserSettings
 from app.db.models.chat import Chat
+from app.db.models.gemini import GeminiProject, QuotaDailyUsage, QuotaMinuteUsage, QuotaPolicy
 from app.db.models.generation_run import GenerationRun
 from app.db.models.message import Message, MessagePart
 from app.db.models.user import User
@@ -9,9 +10,13 @@ from app.db.models.user import User
 __all__ = [
     "AccessGrant",
     "Chat",
+    "GeminiProject",
     "GenerationRun",
     "Message",
     "MessagePart",
+    "QuotaDailyUsage",
+    "QuotaMinuteUsage",
+    "QuotaPolicy",
     "User",
     "UserModelPermission",
     "UserSettings",

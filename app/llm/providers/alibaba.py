@@ -214,9 +214,7 @@ def _extract_usage(chunk: dict[str, Any]) -> Usage | None:
     )
 
 
-def _accumulate_tool_call(
-    pending: dict[int, dict[str, Any]], tool_call: dict[str, Any]
-) -> None:
+def _accumulate_tool_call(pending: dict[int, dict[str, Any]], tool_call: dict[str, Any]) -> None:
     index = tool_call.get("index", 0)
     acc = pending.setdefault(index, {"id": None, "name": "", "args": []})
     if tool_call.get("id"):

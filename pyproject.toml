@@ -20,6 +20,7 @@ dependencies = [
     "cryptography>=42",
     "openai>=1.40",
     "google-genai>=2.24,<3.0.0",
+    "tzdata>=2024.1",  # IANA tz для zoneinfo (app.llm.gemini.quota PACIFIC) на Windows
 ]
 
 [project.optional-dependencies]
