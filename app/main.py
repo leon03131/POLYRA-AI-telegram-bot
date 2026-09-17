@@ -6,7 +6,11 @@ import logging
 from app.bot.dispatcher import create_bot, create_dispatcher, setup_bot_commands
 from app.config import get_settings
 from app.db.session import create_engine_from_url, make_session_factory
+from app.llm.registry import default_registry
 from app.observability.logging import setup_logging
+from app.security.crypto import CryptoBox
+from app.services.generation import GenerationRegistry, GenerationService
+from app.services.llm_factory import build_llm_stream
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +26,29 @@ async def main() -> None:
 
     engine = create_engine_from_url(settings.database_url)
     session_factory = make_session_factory(engine)
+    crypto = CryptoBox(settings.master_encryption_key)
+    registry = default_registry()
+    llm_stream = build_llm_stream(
+        settings=settings,
+        session_factory=session_factory,
+        crypto=crypto,
+        registry=registry,
+    )
+    generation_registry = GenerationRegistry()
+    generation_service = GenerationService(
+        session_factory=session_factory,
+        registry=registry,
+        llm_stream=llm_stream,
+        settings=settings,
+        generation_registry=generation_registry,
+    )
     bot = create_bot(settings)
-    dp = create_dispatcher(settings, session_factory)
+    dp = create_dispatcher(
+        settings,
+        session_factory,
+        generation_service=generation_service,
+        generation_registry=generation_registry,
+    )
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         await setup_bot_commands(bot)

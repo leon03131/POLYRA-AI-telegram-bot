@@ -78,7 +78,7 @@ class FakeProjectStore:
     def _replace(self, project_id: UUID, **changes: object) -> None:
         for i, p in enumerate(self.projects):
             if p.id == project_id:
-                self.projects[i] = dataclasses.replace(p, **changes)  # type: ignore[arg-type]
+                self.projects[i] = dataclasses.replace(p, **changes)
 
     async def list_all(self) -> list[ProjectInfo]:
         return list(self.projects)
@@ -182,7 +182,7 @@ def _make_pool(
         store=store,
         quota_for_model=lambda _model: QuotaTracker(quota_store, effective),
         decrypt=_decrypt,
-        **kw,  # type: ignore[arg-type]
+        **kw,
     )
     return pool, store, quota_store
 

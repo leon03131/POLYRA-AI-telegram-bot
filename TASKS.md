@@ -50,13 +50,25 @@
 - [x] tests: 18 gemini + 19 alibaba + 16 registry/access — 85 всего; ruff ✓ mypy ✓
 - Интеграционные правки: рефакторинг SSE-парсеров (C901), фиксы тестовых helpers
 
-## M4 — Gemini project pool (NEXT)
+## M4 — Gemini project pool  ✅ DONE (2026-09-18)
 
-- [ ] models gemini_projects/quota_policies/quota_minute_usage/quota_daily_usage + миграция 0003
-- [ ] repositories/gemini.py (projects CRUD, quota read/reserve/reconcile)
-- [ ] llm/gemini/pool.py + quota.py (rotation, cooldown, failover по ADR-005)
-- [ ] tests: rotation/disabled/cooldown/429→next/401→disable/400→no-rotate/exhausted/race
+- [x] Модели gemini_projects/quota_policies/quota_minute_usage/quota_daily_usage + миграция 0003
+- [x] repositories/gemini.py (projects CRUD, move, health, cooldown, quota pg_insert ON CONFLICT)
+- [x] llm/gemini/quota.py (UTC minute window, Pacific day, QuotaTracker) + pool.py
+      (round-robin, cooldowns по ADR-005, stream_with_failover, PoolExhaustedError)
+- [x] llm/gemini/store_db.py (DB-адаптеры ProjectStore/QuotaStore, session_factory)
+- [x] tzdata добавлена (Windows ZoneInfo)
+- [x] tests: 19 pool-тестов (все правила ADR-005 + race + cancel) — 104 всего; ruff/mypy ✓
 
-## M5..M12
+## M5 — streaming + cancellation (NEXT)
+
+- [ ] bot/streaming/draft.py (rich draft → message draft → throttled edit; throttle; sanitize)
+- [ ] services/generation.py + GenerationRegistry (cancel по (chat_id, draft_id))
+- [ ] provider_credentials (таблица + миграция 0004) + seed quota_policies (4/249999/19)
+- [ ] wiring: chat.py/photos.py → реальная генерация; stop.py → отмена
+- [ ] scripts/import_gemini_keys.py
+- [ ] tests: stream buffer, stop cancels, partial persist, photo flow
+
+## M6..M12
 
 См. PLAN.md §5. Детализация добавляется перед стартом каждого milestone.

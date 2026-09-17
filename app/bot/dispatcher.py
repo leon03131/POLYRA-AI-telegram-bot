@@ -1,5 +1,9 @@
 """Сборка Bot и Dispatcher."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
@@ -11,6 +15,9 @@ from app.bot.middleware.access import AccessMiddleware
 from app.bot.middleware.errors import on_error
 from app.bot.routers import chat, commands, photos, stop
 from app.config import Settings
+
+if TYPE_CHECKING:
+    from app.services.generation import GenerationRegistry, GenerationService
 
 BOT_COMMANDS = [
     BotCommand(command="start", description="Начать работу"),
@@ -34,9 +41,20 @@ def create_bot(settings: Settings) -> Bot:
 def create_dispatcher(
     settings: Settings,
     session_factory: async_sessionmaker[AsyncSession],
+    *,
+    generation_service: GenerationService,
+    generation_registry: GenerationRegistry,
 ) -> Dispatcher:
-    """Dispatcher: error handler, access middleware на message/callback_query, роутеры."""
-    dp = Dispatcher(settings=settings)  # workflow_data → data["settings"] в хендлерах
+    """Dispatcher: error handler, access middleware на message/callback_query, роутеры.
+
+    generation_service/generation_registry кладутся в workflow_data и инъектируются
+    в хендлеры по имени параметра.
+    """
+    dp = Dispatcher(
+        settings=settings,  # workflow_data → data["settings"] в хендлерах
+        generation_service=generation_service,
+        generation_registry=generation_registry,
+    )
     dp.errors.register(on_error)
     dp.message.middleware(AccessMiddleware(session_factory, settings))
     dp.callback_query.middleware(AccessMiddleware(session_factory, settings))

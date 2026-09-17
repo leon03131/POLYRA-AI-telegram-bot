@@ -302,8 +302,8 @@ async def test_http_error_classification(status: int, exc_cls: type[Exception]) 
     provider = _make_provider(lambda req: _error_response(status, "Throttling.RateQuota"))
     with pytest.raises(exc_cls) as exc_info:
         await _collect(provider, _request())
-    assert exc_info.value.raw_code == "Throttling.RateQuota"  # type: ignore[attr-defined]
-    assert exc_info.value.status_code == status  # type: ignore[attr-defined]
+    assert exc_info.value.raw_code == "Throttling.RateQuota"
+    assert exc_info.value.status_code == status
 
 
 async def test_retry_once_on_500_then_success() -> None:

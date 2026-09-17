@@ -14,7 +14,7 @@ from aiogram.types import (
     Message,
     WebAppInfo,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
 from app.db.models import User
@@ -75,14 +75,29 @@ async def cmd_help(message: Message) -> None:
 
 
 @router.message(Command("new"))
-async def cmd_new(message: Message, user: User, db_session: AsyncSession) -> None:
-    await ChatService(db_session).create_chat(user.id)
+async def cmd_new(
+    message: Message,
+    user: User,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as session:
+        await ChatService(session).create_chat(user.id)
+        await session.commit()
     await message.answer("🆕 Новый чат создан. Пишите сообщение — начнём диалог.")
 
 
 @router.message(Command("chats"))
-async def cmd_chats(message: Message, user: User, db_session: AsyncSession) -> None:
-    service = ChatService(db_session)
+async def cmd_chats(
+    message: Message,
+    user: User,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as session:
+        service = ChatService(session)
+        await _send_chats_list(message, service, user)
+
+
+async def _send_chats_list(message: Message, service: ChatService, user: User) -> None:
     chats = await service.list_chats(user.id)
     if not chats:
         await message.answer("У вас пока нет чатов. /new — создать.")
@@ -99,16 +114,22 @@ async def cmd_chats(message: Message, user: User, db_session: AsyncSession) -> N
 
 
 @router.callback_query(F.data.startswith(_OPEN_CHAT_PREFIX))
-async def open_chat(callback: CallbackQuery, user: User, db_session: AsyncSession) -> None:
+async def open_chat(
+    callback: CallbackQuery,
+    user: User,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     chat_id = parse_open_chat_callback(callback.data or "")
     if chat_id is None:
         await callback.answer("Некорректные данные кнопки", show_alert=True)
         return
-    chat = await ChatRepository(db_session).get(chat_id)
-    if chat is None or chat.owner_user_id != user.id:
-        await callback.answer("Чат не найден", show_alert=True)
-        return
-    await ChatService(db_session).set_current_chat(user.id, chat.id)
+    async with session_factory() as session:
+        chat = await ChatRepository(session).get(chat_id)
+        if chat is None or chat.owner_user_id != user.id:
+            await callback.answer("Чат не найден", show_alert=True)
+            return
+        await ChatService(session).set_current_chat(user.id, chat.id)
+        await session.commit()
     await callback.answer("Чат выбран")
     if isinstance(callback.message, Message):
         await callback.message.answer(f"Открыт чат: {chat.title or 'Без названия'}")

@@ -1,7 +1,10 @@
 """Middleware доступа: upsert пользователя, проверка гранта, инъекция в data.
 
-Для допущенных пользователей кладёт в handler data: ``user``, ``permissions``,
-``db_session`` (одна сессия на update, commit после хендлера, rollback при ошибке).
+Сессия БД живёт ТОЛЬКО на время проверки доступа (commit + close до вызова
+хендлера): генерации — долгие, держать транзакцию нельзя. Хендлеры, которым
+нужна БД, открывают короткие сессии через ``data["session_factory"]``.
+
+В data: ``user``, ``permissions``, ``session_factory``.
 """
 
 import logging
@@ -96,11 +99,7 @@ class AccessMiddleware(BaseMiddleware):
 
             data["user"] = user
             data["permissions"] = permissions
-            data["db_session"] = session
-            try:
-                result = await handler(event, data)
-            except Exception:
-                await session.rollback()
-                raise
-            await session.commit()
-            return result
+            data["session_factory"] = self._session_factory
+            await session.commit()  # зафиксировать upsert/проверку ДО хендлера
+
+        return await handler(event, data)

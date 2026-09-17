@@ -1,34 +1,71 @@
-"""Приём фото в текущий чат."""
+"""Приём фото: скачивание, сборка parts (image первым), запуск генерации."""
 
-from aiogram import F, Router
+from __future__ import annotations
+
+import base64
+import logging
+from typing import TYPE_CHECKING, Any
+
+from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.types import Message
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import User
-from app.services.chats import ChatService
+from app.services.access import EffectivePermissions
+
+if TYPE_CHECKING:
+    from app.services.generation import GenerationService
+
+logger = logging.getLogger(__name__)
 
 router = Router(name="photos")
 
 MAX_PHOTO_SIZE_BYTES = 15 * 1024 * 1024  # 15 МБ
+_DOWNLOAD_ERROR_TEXT = "⚠️ Не удалось загрузить фото. Попробуйте ещё раз."
 
 
 @router.message(F.photo)
-async def on_photo_message(message: Message, user: User, db_session: AsyncSession) -> None:
+async def on_photo_message(
+    message: Message,
+    user: User,
+    permissions: EffectivePermissions,
+    bot: Bot,
+    generation_service: GenerationService,
+) -> None:
+    """Скачать фото, собрать parts (image, затем caption — как в M2), запустить генерацию."""
     if not message.photo:
         return
     photo = message.photo[-1]  # максимальное разрешение из вариантов
     if photo.file_size is not None and photo.file_size > MAX_PHOTO_SIZE_BYTES:
         await message.answer("⚠️ Фото слишком большое: максимум 15 МБ.")
         return
-    service = ChatService(db_session)
-    chat = await service.get_or_create_current_chat(user.id)
-    await service.save_user_photo_message(
-        chat.id,
-        caption=message.caption,
-        photo_file_id=photo.file_id,
-        photo_file_size=photo.file_size,
-        width=photo.width,
-        height=photo.height,
+    try:
+        file = await bot.get_file(photo.file_id)
+        if file.file_path is None:
+            await message.answer(_DOWNLOAD_ERROR_TEXT)
+            return
+        buf = await bot.download_file(file.file_path)
+        data = buf.read() if buf is not None else b""
+    except TelegramAPIError:
+        logger.info("photo download failed chat=%s", message.chat.id, exc_info=True)
+        await message.answer(_DOWNLOAD_ERROR_TEXT)
+        return
+    if not data:
+        await message.answer(_DOWNLOAD_ERROR_TEXT)
+        return
+    parts: list[dict[str, Any]] = [
+        {
+            "type": "image",
+            "mime_type": "image/jpeg",
+            "data_base64": base64.b64encode(data).decode("ascii"),
+        }
+    ]
+    if message.caption:
+        parts.append({"type": "text", "text": message.caption})
+    await generation_service.generate(
+        bot=bot,
+        tg_chat_id=message.chat.id,
+        user=user,
+        permissions=permissions,
+        current_parts=parts,
     )
-    # TODO(M3): заменить заглушку на запуск генерации ответа модели с учётом фото.
-    await message.answer("💾 Принято. Подключение моделей — на следующем этапе (M3).")

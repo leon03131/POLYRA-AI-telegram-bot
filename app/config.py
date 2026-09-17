@@ -21,6 +21,15 @@ class Settings(BaseSettings):
     telegram_proxy: str | None = None
     gemini_base_url: str = "https://extraordinary-piroshki-4e3b92.netlify.app"
     alibaba_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    # bootstrap-ключ (env ALIBABA_API_KEY); основной путь — provider_credentials в БД
+    alibaba_api_key: str = ""
+    default_model: str = "gemini-3.8-flash"
+    default_system_prompt: str = (
+        "Ты — полезный AI-ассистент в Telegram. Отвечай по-русски, "
+        "если пользователь пишет по-русски. Будь точным и лаконичным."
+    )
+    recent_history_limit: int = 20
+    photo_max_bytes: int = 15 * 1024 * 1024
     log_level: str = "INFO"
     session_token_ttl_seconds: int = 900
 
