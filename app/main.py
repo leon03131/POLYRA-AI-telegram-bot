@@ -8,7 +8,11 @@ from app.config import get_settings
 from app.context import ContextBuilder, ContextCompactor, TitleGenerator, TokenBudgetManager
 from app.db.session import create_engine_from_url, make_session_factory
 from app.llm.registry import default_registry
+from app.llm.tools.builtin import build_default_registry
+from app.memory.extractor import MemoryExtractor
+from app.memory.retriever import PostgresFtsRetriever
 from app.observability.logging import setup_logging
+from app.search.manager import SearchManager
 from app.security.crypto import CryptoBox
 from app.services.generation import GenerationRegistry, GenerationService
 from app.services.llm_factory import build_llm_stream
@@ -55,6 +59,16 @@ async def main() -> None:
         title_model=settings.title_model,
         title_thinking=settings.title_thinking,
     )
+    memory_retriever = PostgresFtsRetriever(session_factory)
+    memory_extractor = MemoryExtractor(
+        session_factory=session_factory,
+        llm_stream=llm_stream,
+        memory_model=settings.memory_model,
+        memory_thinking=settings.memory_thinking,
+        dedup_threshold=settings.memory_dedup_threshold,
+    )
+    search_manager = SearchManager(session_factory=session_factory, crypto=crypto)
+    tool_registry = build_default_registry()
     generation_service = GenerationService(
         session_factory=session_factory,
         registry=registry,
@@ -64,6 +78,10 @@ async def main() -> None:
         context_builder=context_builder,
         compactor=compactor,
         title_generator=title_generator,
+        memory_retriever=memory_retriever,
+        memory_extractor=memory_extractor,
+        tool_registry=tool_registry,
+        search_manager=search_manager,
     )
     bot = create_bot(settings)
     dp = create_dispatcher(

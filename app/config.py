@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     memory_thinking: str = "medium"
     memory_dedup_threshold: float = 0.85
     photo_max_bytes: int = 15 * 1024 * 1024
+    # tool engine (M8)
+    max_tool_iterations: int = 8  # лимит раундов tool-calling loop
     log_level: str = "INFO"
     session_token_ttl_seconds: int = 900
 

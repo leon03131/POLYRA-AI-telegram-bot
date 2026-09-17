@@ -153,9 +153,7 @@ class FakeMemoryStore:
                 return memory
         return None
 
-    async def find_by_normalized(
-        self, user_id: uuid.UUID, normalized_text: str
-    ) -> Memory | None:
+    async def find_by_normalized(self, user_id: uuid.UUID, normalized_text: str) -> Memory | None:
         for memory in self.existing:
             if memory.user_id == user_id and memory.normalized_text == normalized_text:
                 return memory

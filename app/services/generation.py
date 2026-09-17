@@ -12,7 +12,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator, Coroutine
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -29,7 +29,7 @@ from app.db.repositories import (
     MessageRepository,
     UserSettingsRepository,
 )
-from app.llm.base import LLMRequest
+from app.llm.base import LLMRequest, LLMTool
 from app.llm.errors import (
     AuthError,
     InvalidRequestError,
@@ -43,6 +43,9 @@ from app.llm.errors import (
 from app.llm.events import Done, LLMEvent, ReasoningDelta, TextDelta, ToolCall, Usage
 from app.llm.gemini.pool import PoolExhaustedError
 from app.llm.registry import ModelRegistry, UnknownModelError
+from app.llm.tools.registry import ToolContext, ToolRegistry
+from app.llm.tools.runner import ToolExecution, ToolRunner
+from app.llm.tools.schemas import make_llm_tools
 from app.services.access import EffectivePermissions, is_model_allowed
 from app.services.chats import ChatService
 from app.services.llm_factory import LLMStreamFn
@@ -113,6 +116,8 @@ class StreamOutcome:
     tool_calls_count: int
     first_token_at: datetime | None
     reasoning_chunks: int
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    finish_reason: str | None = None
 
 
 @dataclass(slots=True)
@@ -133,6 +138,7 @@ class _PreparedGeneration:
     user_text: str = ""
     user_id: uuid.UUID | None = None
     memory_extraction_enabled: bool = False
+    web_enabled: bool = False
 
 
 def user_error_message(exc: BaseException, model_display: str) -> str:
@@ -176,6 +182,56 @@ def resolve_model_and_thinking(
     if thinking is not None and thinking not in model_def.thinking_modes:
         thinking = None
     return model_id, thinking
+
+
+_SOURCES_LINE = "SOURCES:"
+
+
+def extract_sources(tool_content: str) -> list[tuple[str, str]]:
+    """Пары (title, url) из результата web_search: нумерованный список «N. title\\nURL».
+
+    Строка-маркер SOURCES: url1 | url2 — запасной источник url без заголовков.
+    """
+    sources: list[tuple[str, str]] = []
+    lines = tool_content.splitlines()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith(_SOURCES_LINE):
+            for url in stripped[len(_SOURCES_LINE) :].split("|"):
+                url = url.strip()
+                if url:
+                    sources.append((url, url))
+        elif (
+            stripped
+            and stripped[0].isdigit()
+            and ". " in stripped[:5]
+            and i + 1 < len(lines)
+            and lines[i + 1].strip().startswith(("http://", "https://"))
+        ):
+            sources.append((stripped.split(". ", 1)[1].strip(), lines[i + 1].strip()))
+    return sources
+
+
+def collect_sources(tool_records: list[tuple[ToolCall, ToolExecution]]) -> list[tuple[str, str]]:
+    """Все источники из web_search-вызовов, dedupe по url (порядок сохраняется)."""
+    seen: set[str] = set()
+    sources: list[tuple[str, str]] = []
+    for call, execution in tool_records:
+        if call.name != "web_search" or execution.result.is_error:
+            continue
+        for title, url in extract_sources(execution.result.content):
+            if url not in seen:
+                seen.add(url)
+                sources.append((title, url))
+    return sources
+
+
+def build_sources_suffix(sources: list[tuple[str, str]]) -> str:
+    """Markdown-блок «Источники» для финального сообщения."""
+    lines = ["\n\n**Источники:**"]
+    for i, (title, url) in enumerate(sources, 1):
+        lines.append(f"{i}. [{title}]({url})")
+    return "\n".join(lines)
 
 
 def extract_user_text(parts: list[dict[str, Any]]) -> str:
@@ -223,6 +279,8 @@ class GenerationService:
         title_generator: TitleGenerator | None = None,
         memory_retriever: PostgresFtsRetriever | None = None,
         memory_extractor: MemoryExtractor | None = None,
+        tool_registry: ToolRegistry | None = None,
+        search_manager: Any | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._registry = registry
@@ -234,6 +292,8 @@ class GenerationService:
         self._title_generator = title_generator
         self._memory_retriever = memory_retriever
         self._memory_extractor = memory_extractor
+        self._tool_registry = tool_registry
+        self._search_manager = search_manager
 
     async def generate(
         self,
@@ -280,11 +340,81 @@ class GenerationService:
         )
         try:
             await streamer.flush(force=True)  # стартовый плейсхолдер-драфт
+            llm_tools, tool_runner = self._prepare_tools(prepared, user, permissions)
+            loop_result = await self._stream_loop(
+                prepared,
+                streamer,
+                llm_tools=llm_tools,
+                tool_runner=tool_runner,
+                user=user,
+                permissions=permissions,
+                cancellation=cancellation,
+            )
+            if loop_result is None:
+                return  # ошибка уже обработана внутри (fail + save_failed)
+            final_outcome, tool_records = loop_result
+            if final_outcome.cancelled:
+                await self._save_cancelled(prepared, final_outcome, bot=bot, tg_chat_id=tg_chat_id)
+            else:
+                sources = collect_sources(tool_records)
+                if sources and "Источники" not in final_outcome.text:
+                    suffix = build_sources_suffix(sources)
+                    await streamer.append(suffix)
+                    final_outcome.text += suffix
+                await streamer.finalize()
+                await self._save_completed(prepared, final_outcome, tool_records)
+                self._schedule_maintenance(prepared, final_outcome)
+        finally:
+            self._generations.pop(tg_chat_id, prepared.draft_id)
+
+    def _prepare_tools(
+        self,
+        prepared: _PreparedGeneration,
+        user: User,
+        permissions: EffectivePermissions,
+    ) -> tuple[list[LLMTool] | None, ToolRunner | None]:
+        """Собрать инструменты для запроса: права + web off + title-tool только без title."""
+        if self._tool_registry is None:
+            return None, None
+        enabled = self._tool_registry.list_enabled(permissions)
+        if not prepared.web_enabled:
+            enabled = [t for t in enabled if t.required_permission != "web_search"]
+        if prepared.chat_title is not None:
+            # set_chat_title доступен только пока title IS NULL
+            enabled = [t for t in enabled if t.name != "set_chat_title"]
+        if not enabled:
+            return None, None
+        runner = ToolRunner(self._tool_registry, session_factory=self._session_factory)
+        return make_llm_tools(enabled), runner
+
+    async def _stream_loop(
+        self,
+        prepared: _PreparedGeneration,
+        streamer: DraftStreamer,
+        *,
+        llm_tools: list[LLMTool] | None,
+        tool_runner: ToolRunner | None,
+        user: User,
+        permissions: EffectivePermissions,
+        cancellation: asyncio.Event,
+    ) -> tuple[StreamOutcome, list[tuple[ToolCall, ToolExecution]]] | None:
+        """Цикл «стрим → tool calls → стрим». None — ошибка (уже обработана)."""
+        messages = list(prepared.messages)
+        text_parts: list[str] = []
+        usage: Usage | None = None
+        first_token_at: datetime | None = None
+        reasoning_chunks = 0
+        tool_records: list[tuple[ToolCall, ToolExecution]] = []
+        cancelled = False
+        iterations = 0
+
+        while True:
             request = LLMRequest(
                 model=prepared.model_id,
-                messages=prepared.messages,
+                messages=messages,
                 system_prompt=prepared.system_prompt,
                 thinking=prepared.thinking,
+                tools=llm_tools,
                 cancellation=cancellation,
             )
             try:
@@ -293,20 +423,101 @@ class GenerationService:
                 logger.info("generation failed (run %s): %s", prepared.run_id, exc)
                 await streamer.fail(user_error_message(exc, prepared.model_display))
                 await self._save_failed(prepared, exc)
-                return
+                return None
             except Exception as exc:
                 logger.exception("generation crashed (run %s)", prepared.run_id)
                 await streamer.fail(user_error_message(exc, prepared.model_display))
                 await self._save_failed(prepared, exc)
-                return
+                return None
+
+            if outcome.usage is not None:
+                usage = outcome.usage
+            if outcome.first_token_at is not None and first_token_at is None:
+                first_token_at = outcome.first_token_at
+            reasoning_chunks += outcome.reasoning_chunks
+            text_parts.append(outcome.text)
             if outcome.cancelled:
-                await self._save_cancelled(prepared, outcome, bot=bot, tg_chat_id=tg_chat_id)
-            else:
-                await streamer.finalize()
-                await self._save_completed(prepared, outcome)
-                self._schedule_maintenance(prepared, outcome)
-        finally:
-            self._generations.pop(tg_chat_id, prepared.draft_id)
+                cancelled = True
+                break
+            if not self._should_run_tools(outcome, tool_runner, iterations):
+                break
+            iterations += 1
+            assert tool_runner is not None  # гарантировано _should_run_tools
+            tool_context = ToolContext(
+                user_id=user.id,
+                chat_id=prepared.chat_id,
+                permissions=permissions,
+                session_factory=self._session_factory,
+                settings=self._settings,
+                search_manager=self._search_manager,
+            )
+            messages.append(self._assistant_tool_message(outcome.tool_calls))
+            for call in outcome.tool_calls:
+                execution = await tool_runner.execute(
+                    call, tool_context, generation_run_id=prepared.run_id
+                )
+                tool_records.append((call, execution))
+                messages.append(
+                    {
+                        "role": "tool",
+                        "parts": [
+                            {
+                                "type": "tool_result",
+                                "call_id": call.id,
+                                "name": call.name,
+                                "content": execution.result.content,
+                                "is_error": execution.result.is_error,
+                            }
+                        ],
+                    }
+                )
+            if cancellation.is_set():
+                cancelled = True
+                break
+
+        final = StreamOutcome(
+            text="".join(text_parts),
+            usage=usage,
+            cancelled=cancelled,
+            tool_calls_count=len(tool_records),
+            first_token_at=first_token_at,
+            reasoning_chunks=reasoning_chunks,
+        )
+        return final, tool_records
+
+    def _should_run_tools(
+        self,
+        outcome: StreamOutcome,
+        tool_runner: ToolRunner | None,
+        iterations: int,
+    ) -> bool:
+        """Продолжать ли tool loop: есть вызовы, runner включён, лимит не достигнут."""
+        if outcome.finish_reason != "tool_calls" or not outcome.tool_calls:
+            return False
+        if tool_runner is None:
+            logger.warning("модель запросила tools при отключённом tool engine")
+            return False
+        if iterations >= self._settings.max_tool_iterations:
+            logger.warning("max tool iterations (%s) reached", self._settings.max_tool_iterations)
+            return False
+        return True
+
+    @staticmethod
+    def _assistant_tool_message(tool_calls: list[ToolCall]) -> dict[str, Any]:
+        """Assistant-сообщение с tool_call parts (provider_meta — для thought signatures)."""
+        return {
+            "role": "assistant",
+            "parts": [
+                {
+                    "type": "tool_call",
+                    "id": call.id,
+                    "name": call.name,
+                    "arguments_json": call.arguments_json,
+                    "provider_meta": call.provider_meta,
+                }
+                for call in tool_calls
+            ],
+        }
 
     def _schedule_maintenance(self, prepared: _PreparedGeneration, outcome: StreamOutcome) -> None:
         """Фон после успешного ответа: compaction, автоназвание, память."""
@@ -375,6 +586,8 @@ class GenerationService:
         tool_calls_count = 0
         reasoning_chunks = 0
         cancelled = False
+        tool_calls: list[ToolCall] = []
+        finish_reason: str | None = None
         try:
             async for event in stream:
                 if cancellation.is_set():
@@ -389,10 +602,11 @@ class GenerationService:
                     reasoning_chunks += 1
                 elif isinstance(event, ToolCall):
                     tool_calls_count += 1
-                    logger.warning("tool call при отключённых tools (M5): %s", event.name)
+                    tool_calls.append(event)
                 elif isinstance(event, Usage):
                     usage = event
                 elif isinstance(event, Done):
+                    finish_reason = event.finish_reason
                     break
         except asyncio.CancelledError:
             cancelled = True
@@ -405,6 +619,8 @@ class GenerationService:
             tool_calls_count=tool_calls_count,
             first_token_at=first_token_at,
             reasoning_chunks=reasoning_chunks,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
         )
 
     async def _prepare(
@@ -469,6 +685,8 @@ class GenerationService:
                 if chat.memory_enabled is not None
                 else user_settings.memory_enabled
             )
+            web_mode = chat.web_mode if chat.web_mode is not None else user_settings.web_mode
+            web_enabled = bool(permissions.can_use_web_search) and web_mode != "off"
             memories: list[str] = []
             if memory_enabled and self._memory_retriever is not None:
                 try:
@@ -525,16 +743,38 @@ class GenerationService:
             user_text=user_text,
             user_id=user.id,
             memory_extraction_enabled=memory_enabled,
+            web_enabled=web_enabled,
         )
 
-    async def _save_completed(self, prepared: _PreparedGeneration, outcome: StreamOutcome) -> None:
+    async def _save_completed(
+        self,
+        prepared: _PreparedGeneration,
+        outcome: StreamOutcome,
+        tool_records: list[tuple[ToolCall, ToolExecution]] | None = None,
+    ) -> None:
         """Финал нормы: assistant message (done) + run completed + commit."""
         usage = outcome.usage
+        parts: list[dict[str, Any]] = [{"type": "text", "text": outcome.text}]
+        for call, execution in tool_records or []:
+            parts.append(
+                {
+                    "type": "tool_call",
+                    "text": f"{call.name}({call.arguments_json[:200]})",
+                    "metadata_json": {"name": call.name, "arguments_json": call.arguments_json},
+                }
+            )
+            parts.append(
+                {
+                    "type": "tool_result",
+                    "text": execution.result.content[:500],
+                    "metadata_json": {"name": call.name, "status": execution.status},
+                }
+            )
         async with self._session_factory() as session:
             await MessageRepository(session).add_message(
                 prepared.chat_id,
                 "assistant",
-                parts=[{"type": "text", "text": outcome.text}],
+                parts=parts,
                 status="done",
                 provider=prepared.provider,
                 model_id=prepared.model_id,

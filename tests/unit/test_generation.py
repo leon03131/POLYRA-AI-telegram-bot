@@ -25,14 +25,21 @@ from app.llm.errors import (
     ServerError,
     TimeoutError_,
 )
-from app.llm.events import Done, LLMEvent, ReasoningDelta, TextDelta, ToolCall, Usage
+from app.llm.events import Done, LLMEvent, ReasoningDelta, TextDelta, ToolCall, ToolResult, Usage
 from app.llm.gemini.pool import PoolExhaustedError
 from app.llm.registry import default_registry
+from app.llm.tools.registry import ToolDefinition, ToolRegistry
+from app.llm.tools.runner import ToolExecution, ToolRunner
+from app.services.access import evaluate_access
 from app.services.generation import (
     ActiveGeneration,
     GenerationRegistry,
     GenerationService,
+    _PreparedGeneration,
     build_messages,
+    build_sources_suffix,
+    collect_sources,
+    extract_sources,
     resolve_model_and_thinking,
     user_error_message,
 )
@@ -350,3 +357,175 @@ async def test_consume_quiet_stream_end_with_cancellation_flag() -> None:
     outcome = await _service()._consume(quiet(), FakeStreamer(), cancellation)
     assert outcome.cancelled is True
     assert outcome.text == "abc"
+
+
+# --- tool loop / sources (M8) ------------------------------------------------
+
+
+def test_extract_sources_numbered_list() -> None:
+    content = "1. Первый\nhttps://a.example\nsnippet\n2. Второй\nhttps://b.example\nsnippet"
+    sources = extract_sources(content)
+    assert sources == [("Первый", "https://a.example"), ("Второй", "https://b.example")]
+
+
+def test_extract_sources_marker_line() -> None:
+    sources = extract_sources("текст\nSOURCES: https://a.example | https://b.example")
+    assert sources == [
+        ("https://a.example", "https://a.example"),
+        ("https://b.example", "https://b.example"),
+    ]
+
+
+def test_collect_sources_dedupe_and_skip_errors() -> None:
+    call = ToolCall(id="1", name="web_search", arguments_json="{}")
+    ok_execution = ToolExecution(
+        call=call,
+        result=ToolResult(
+            call_id="1",
+            name="web_search",
+            content="1. A\nhttps://a.example\nSOURCES: https://a.example | https://b.example",
+        ),
+        status="ok",
+        duration_ms=1,
+    )
+    err_execution = ToolExecution(
+        call=call,
+        result=ToolResult(
+            call_id="1", name="web_search", content="1. X\nhttps://x.example", is_error=True
+        ),
+        status="error",
+        duration_ms=1,
+    )
+    sources = collect_sources([(call, ok_execution), (call, err_execution)])
+    assert [url for _, url in sources] == ["https://a.example", "https://b.example"]
+
+
+def test_build_sources_suffix() -> None:
+    suffix = build_sources_suffix([("A", "https://a.example"), ("B", "https://b.example")])
+    assert "Источники" in suffix
+    assert "1. [A](https://a.example)" in suffix
+    assert "2. [B](https://b.example)" in suffix
+
+
+def _prepared_stub() -> _PreparedGeneration:
+    return _PreparedGeneration(
+        chat_id=uuid.uuid4(),
+        run_id=uuid.uuid4(),
+        draft_id=1,
+        model_id="gemini-3.8-flash",
+        model_display="Gemini 3.8 Flash",
+        provider="gemini",
+        thinking=None,
+        system_prompt="sys",
+        messages=[{"role": "user", "parts": [{"type": "text", "text": "hi"}]}],
+        web_enabled=True,
+    )
+
+
+def _permissions_stub() -> object:
+    return evaluate_access(
+        is_owner=True,
+        user_status="active",
+        grant=None,
+        allowed_models=None,
+        now=__import__("datetime").datetime.now(__import__("datetime").UTC),
+    )
+
+
+async def test_stream_loop_executes_tool_calls_and_continues() -> None:
+    """Первый раунд — tool_call, второй — текст; результат инструмента в истории."""
+    calls: list[LLMRequest] = []
+
+    def fake_stream(request: LLMRequest) -> AsyncIterator[LLMEvent]:
+        calls.append(request)
+        if len(calls) == 1:
+            return _stream_of(
+                [
+                    ToolCall(id="c1", name="echo", arguments_json='{"text": "hi"}'),
+                    Done("tool_calls"),
+                ]
+            )
+        return _stream_of([TextDelta("готово"), Done("stop")])
+
+    async def echo_handler(args: dict, context: object) -> str:
+        return "echo: " + str(args["text"])
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="echo",
+            description="echo",
+            parameters={
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+            },
+            handler=echo_handler,
+        )
+    )
+    service = _service()
+    service._llm_stream = fake_stream
+    runner = ToolRunner(registry, session_factory=None)
+    streamer = FakeStreamer()
+
+    result = await service._stream_loop(
+        _prepared_stub(),
+        streamer,
+        llm_tools=None,
+        tool_runner=runner,
+        user=SimpleNamespace(id=uuid.uuid4()),
+        permissions=_permissions_stub(),
+        cancellation=asyncio.Event(),
+    )
+
+    assert result is not None
+    outcome, tool_records = result
+    assert outcome.text == "готово"
+    assert outcome.cancelled is False
+    assert outcome.tool_calls_count == 1
+    # второй запрос содержит assistant tool_call + tool result
+    second_messages = calls[1].messages
+    assert any(m["role"] == "assistant" for m in second_messages)
+    tool_msgs = [m for m in second_messages if m["role"] == "tool"]
+    assert tool_msgs and tool_msgs[0]["parts"][0]["content"] == "echo: hi"
+
+
+async def test_stream_loop_respects_max_iterations() -> None:
+    """Модель бесконечно просит tool — цикл останавливается по лимиту."""
+
+    def looping_stream(request: LLMRequest) -> AsyncIterator[LLMEvent]:
+        return _stream_of([ToolCall(id="c", name="echo", arguments_json="{}"), Done("tool_calls")])
+
+    async def echo_handler(args: dict, context: object) -> str:
+        return "ok: " + str(args)[:20]
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="echo", description="echo", parameters={"type": "object"}, handler=echo_handler
+        )
+    )
+    settings = Settings(max_tool_iterations=2)
+    service = GenerationService(
+        session_factory=None,
+        registry=default_registry(),
+        llm_stream=looping_stream,
+        settings=settings,
+        generation_registry=GenerationRegistry(),
+    )
+    runner = ToolRunner(registry, session_factory=None)
+
+    result = await service._stream_loop(
+        _prepared_stub(),
+        FakeStreamer(),
+        llm_tools=None,
+        tool_runner=runner,
+        user=SimpleNamespace(id=uuid.uuid4()),
+        permissions=_permissions_stub(),
+        cancellation=asyncio.Event(),
+    )
+
+    assert result is not None
+    outcome, tool_records = result
+    assert len(tool_records) == 2  # ровно max_tool_iterations исполнений
+    assert outcome.cancelled is False

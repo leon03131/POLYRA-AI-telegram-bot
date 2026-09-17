@@ -16,6 +16,8 @@ from app.db.repositories.gemini import (
 from app.db.repositories.generation_runs import GenerationRunRepository
 from app.db.repositories.memories import MemoryRepository
 from app.db.repositories.messages import MessageRepository
+from app.db.repositories.search_configs import SearchConfigRepository
+from app.db.repositories.tool_calls import ToolCallRepository
 from app.db.repositories.users import UserRepository
 
 __all__ = [
@@ -30,6 +32,8 @@ __all__ = [
     "ProviderCredentialRepository",
     "QuotaPolicyRepository",
     "QuotaUsageRepository",
+    "SearchConfigRepository",
+    "ToolCallRepository",
     "UserRepository",
     "UserSettingsRepository",
 ]

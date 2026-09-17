@@ -66,4 +66,4 @@ module = ["tests.*"]
 disallow_untyped_defs = false
 disallow_untyped_calls = false
 disallow_incomplete_defs = false
-disable_error_code = ["arg-type", "type-arg", "attr-defined"]
+disable_error_code = ["arg-type", "type-arg", "attr-defined", "method-assign"]
