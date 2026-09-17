@@ -1,0 +1,98 @@
+"""Alembic environment (async, asyncpg).
+
+Приоритет URL: env DATABASE_URL > app.config.get_settings().database_url
+> sqlalchemy.url из alembic.ini. Драйвер-only psycopg не требуется:
+plain postgresql:// URL приводится к postgresql+asyncpg://.
+"""
+
+import asyncio
+import os
+from logging.config import fileConfig
+
+from alembic import context
+from sqlalchemy import Connection
+from sqlalchemy.ext.asyncio import async_engine_from_config
+
+from app.db import models as _models  # noqa: F401  (регистрация моделей для autogenerate)
+from app.db.base import Base
+
+config = context.config
+
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+target_metadata = Base.metadata
+
+
+def _ensure_async_driver(url: str) -> str:
+    """Привести plain postgresql:// / postgres:// URL к asyncpg-драйверу."""
+    if url.startswith("postgresql://"):
+        return "postgresql+asyncpg://" + url[len("postgresql://") :]
+    if url.startswith("postgres://"):
+        return "postgresql+asyncpg://" + url[len("postgres://") :]
+    return url
+
+
+def _resolve_url() -> str:
+    """Определить URL БД: DATABASE_URL > app.config > alembic.ini."""
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        try:
+            from app.config import get_settings
+
+            url = get_settings().database_url
+        except Exception:  # noqa: BLE001 — config может отсутствовать на ранних этапах
+            url = None
+    if not url:
+        url = config.get_main_option("sqlalchemy.url")
+    if not url:
+        raise RuntimeError(
+            "Database URL не задан: установите env DATABASE_URL "
+            "или app.config.Settings.database_url"
+        )
+    return _ensure_async_driver(url)
+
+
+def run_migrations_offline() -> None:
+    """Offline-режим: генерация SQL без подключения."""
+    context.configure(
+        url=_resolve_url(),
+        target_metadata=target_metadata,
+        literal_binds=True,
+        compare_type=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def do_run_migrations(connection: Connection) -> None:
+    """Online-режим: применить миграции на живом подключении."""
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+async def run_async_migrations() -> None:
+    """Создать async engine и выполнить миграции через sync-обёртку."""
+    configuration = config.get_section(config.config_ini_section, {}) or {}
+    configuration["sqlalchemy.url"] = _resolve_url()
+    connectable = async_engine_from_config(configuration, prefix="sqlalchemy.")
+    async with connectable.connect() as connection:
+        await connection.run_sync(do_run_migrations)
+    await connectable.dispose()
+
+
+def run_migrations_online() -> None:
+    """Online-режим (точка входа Alembic)."""
+    asyncio.run(run_async_migrations())
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
