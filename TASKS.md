@@ -39,13 +39,24 @@
 - [x] tests: test_bot_helpers.py (+4) — всего 32 зелёные; ruff ✓, mypy ✓ (42 файла)
 - Исправлено при интеграции: shadowing `text` в MessagePart (sql_text), alembic.ini → ASCII
 
-## M3 — LLM abstractions + providers (NEXT)
+## M3 — LLM abstractions + providers  ✅ DONE (2026-09-18)
 
-- [ ] app/llm: base (LLMProvider/LLMRequest), events (TextDelta/ReasoningDelta/ToolCall/ToolResult/Usage/Error/Done), registry, capabilities (ModelDefinition + thinking mapping)
-- [ ] app/llm/providers/alibaba.py (OpenAI-compatible, trust_env=false, reasoning скрыт)
-- [ ] app/llm/providers/gemini.py (raw httpx через proxy владельца, SSE :streamGenerateContent)
-- [ ] tests: thinking mapping, hidden reasoning, no cross-model fallback, image mapping
+- [x] app/llm: base/events/errors (единая таксономия ProviderError)/capabilities/registry/router
+- [x] ModelRegistry: 9 моделей из ТЗ, thinking_modes, internal_only для 3.5-flash-lite
+- [x] providers/gemini.py: raw httpx SSE :streamGenerateContent, thought→ReasoningDelta,
+      thoughtSignature capture, usage, safety, 429 RetryInfo.retry_after
+- [x] providers/alibaba.py: OpenAI-compatible, trust_env=false, thinking-таблица по 5 моделям,
+      tool_calls accumulation, include_usage, bounded retry (2 попытки до первого события)
+- [x] tests: 18 gemini + 19 alibaba + 16 registry/access — 85 всего; ruff ✓ mypy ✓
+- Интеграционные правки: рефакторинг SSE-парсеров (C901), фиксы тестовых helpers
 
-## M4..M12
+## M4 — Gemini project pool (NEXT)
+
+- [ ] models gemini_projects/quota_policies/quota_minute_usage/quota_daily_usage + миграция 0003
+- [ ] repositories/gemini.py (projects CRUD, quota read/reserve/reconcile)
+- [ ] llm/gemini/pool.py + quota.py (rotation, cooldown, failover по ADR-005)
+- [ ] tests: rotation/disabled/cooldown/429→next/401→disable/400→no-rotate/exhausted/race
+
+## M5..M12
 
 См. PLAN.md §5. Детализация добавляется перед стартом каждого milestone.

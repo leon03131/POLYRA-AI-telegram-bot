@@ -57,6 +57,22 @@ Memory: abstraction MemoryRetriever; v1 — PostgreSQL FTS; pgvector/локал�
 embeddings — optional позже. Дедуп/update перед вставкой; retrieval учитывает
 relevance/importance/recency; строгая изоляция по user_id.
 
+## ADR-013 | 2026-09-18 | accepted
+Оба провайдера реализованы как **raw httpx + собственный SSE-парсинг** (без openai/
+google-genai SDK на hot path). Причины: полный контроль base_url/прокси (Gemini custom
+base_url в SDK официально только для enterprise=True), явный разбор reasoning_content /
+thought-parts, единая таксономия ошибок, ротация ключей без переинициализации SDK.
+google-genai SDK остаётся в зависимостях для count_tokens/локального токенизатора (опц.).
+
+## ADR-014 | 2026-09-18 | accepted
+Kimi Dynamic Tool Loading в v1 **не включаем**: на Model Studio endpoint не подтверждён
+(только доки Moonshot). Решение после runtime probe (scripts/smoke_providers.py).
+
+## ADR-015 | 2026-09-18 | accepted
+GeminiProvider получает api_key через `request.metadata["api_key"]` (провайдер stateless
+по ключу) — так M4 pool может повторять ТОТ ЖЕ запрос с другим проектом/ключом.
+Ротация только если не эмитнуто ни одного события (partial stream не перезапускаем).
+
 ## ADR-012 | 2026-09-18 | accepted
 Web content — untrusted data (prompt-injection safe). open_url: только http/https,
 DNS resolve + SSRF checks после каждого redirect, блок private/loopback/link-local/
