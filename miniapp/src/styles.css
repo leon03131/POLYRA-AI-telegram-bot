@@ -724,3 +724,14 @@ textarea {
   padding: 4px 0 8px;
   background: var(--bg);
 }
+
+.row-inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.row-inline > *:first-child {
+  flex: 1;
+  min-width: 0;
+}

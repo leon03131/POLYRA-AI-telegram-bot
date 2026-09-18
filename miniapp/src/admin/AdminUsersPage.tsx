@@ -10,6 +10,7 @@ import {
   EmptyState,
   Input,
   Modal,
+  Section,
   Spinner,
   Toggle,
 } from "../components";
@@ -364,6 +365,7 @@ export function AdminUsersPage() {
 
   const usersQ = useAdminUsers(debounced);
 
+  const [grantById, setGrantById] = useState("");
   const [grantTarget, setGrantTarget] = useState<{ user: AdminUser; mode: "grant" | "extend" } | null>(null);
   const [modelsTarget, setModelsTarget] = useState<AdminUser | null>(null);
   const [confirm, setConfirm] = useState<{ user: AdminUser; action: AccessAction } | null>(null);
@@ -384,8 +386,44 @@ export function AdminUsersPage() {
 
   const users = usersQ.data?.users ?? [];
 
+  const openGrantById = () => {
+    const tgId = Number(grantById.trim());
+    if (!Number.isInteger(tgId) || tgId <= 0) return;
+    // Пользователя может ещё не быть в БД — backend создаст его при grant.
+    const stub: AdminUser = {
+      id: "",
+      telegram_user_id: tgId,
+      username: null,
+      first_name: null,
+      status: "active",
+      is_owner: false,
+      first_seen_at: "",
+      last_seen_at: "",
+      grant: null,
+      allowed_models: null,
+    };
+    setGrantTarget({ user: stub, mode: "grant" });
+  };
+
   return (
     <div className="page">
+      <Section title="Выдать доступ по Telegram ID">
+        <div className="hint-text">
+          Пользователю необязательно писать боту заранее — запись будет создана автоматически.
+        </div>
+        <div className="row-inline">
+          <Input
+            placeholder="например, 795063564"
+            inputMode="numeric"
+            value={grantById}
+            onChange={(e) => setGrantById(e.target.value)}
+          />
+          <Button onClick={openGrantById} disabled={!grantById.trim()}>
+            Выдать
+          </Button>
+        </div>
+      </Section>
+
       <div className="search-input">
         <Input
           placeholder="Поиск: telegram id или username"

@@ -254,3 +254,44 @@ async def test_flush_tail_mode_for_long_text() -> None:
     assert markdown.startswith("…\n")
     assert len(markdown) == 32700 + 2  # префикс + последние 32700 символов
     assert markdown.endswith("y" * 100)
+
+async def test_finalize_tier3_edits_existing_message_instead_of_duplicate() -> None:
+    """Tier 3: финал — edit существующего сообщения, НЕ новое сообщение (нет дублей)."""
+    bot = FakeBot()
+    t, clock = make_clock()
+    streamer = make_streamer(bot, clock)
+    bot.fail("send_rich_message_draft", _bad_request())
+    bot.fail("send_message_draft", _api_error())
+
+    await streamer.append("hello")
+    await streamer.flush(force=True)  # tier3: первичное send_message
+    t[0] += 2.0
+    await streamer.append(" world")
+    await streamer.flush(force=True)  # tier3: edit
+    await streamer.finalize()
+
+    methods = bot.methods()
+    assert methods.count("send_message") == 1  # только первичное сообщение tier-3
+    assert "send_rich_message" not in methods
+    # auto-flush при append + явный flush + финал — все через edit, без новых сообщений
+    final_edit = [kw for name, kw in bot.calls if name == "edit_message_text"][-1]
+    assert final_edit["text"] == "hello world"
+
+
+async def test_finalize_tier3_long_text_edits_then_sends_rest() -> None:
+    """Tier 3 + текст > 4096: первая часть — edit, остаток — новыми сообщениями."""
+    bot = FakeBot()
+    t, clock = make_clock()
+    streamer = make_streamer(bot, clock)
+    bot.fail("send_rich_message_draft", _bad_request())
+    bot.fail("send_message_draft", _api_error())
+
+    long_text = "x" * 5000
+    streamer._text = long_text  # напрямую: нас интересует финал
+    await streamer.flush(force=True)  # tier3: send tail (4000)
+    await streamer.finalize()
+
+    methods = bot.methods()
+    assert methods.count("edit_message_text") == 1
+    assert methods.count("send_message") == 2  # tier3 первичное + «хвост» >4096
+    assert "send_rich_message" not in methods

@@ -120,7 +120,7 @@ export interface AccessGrant {
 }
 
 export interface AdminUser {
-  id: number;
+  id: string;
   telegram_user_id: number;
   username: string | null;
   first_name: string | null;

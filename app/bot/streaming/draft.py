@@ -128,10 +128,17 @@ class DraftStreamer:
             await self._flush_message_edit()
 
     async def finalize(self) -> Message | None:
-        """Отправить финальный текст персистентным сообщением. None, если пусто/ошибка."""
+        """Отправить финальный текст персистентным сообщением. None, если пусто/ошибка.
+
+        Tier 3 — особый случай: сообщение уже существует (send+edit цикл).
+        Финализируем его EDIT'ом, а не новым сообщением (иначе пользователь
+        увидел бы ответ дважды).
+        """
         text = self._text
         if not text:
             return None
+        if self._tier == 3 and self._fallback_message_id is not None:
+            return await self._finalize_existing_message(text)
         try:
             return await self._bot.send_rich_message(
                 self._chat_id,
@@ -149,6 +156,32 @@ class DraftStreamer:
         except TelegramAPIError:
             logger.exception("finalize failed for chat %s", self._chat_id)
             return None
+
+    async def _finalize_existing_message(self, text: str) -> Message | None:
+        """Tier 3: отредактировать существующее сообщение финальным текстом.
+
+        Переполнение MESSAGE_LIMIT: первая часть — edit, остальное — новыми
+        сообщениями. При сбое edit — fallback на отправку новых сообщений.
+        """
+        parts = _split_text(text, MESSAGE_LIMIT)
+        try:
+            edited = await self._bot.edit_message_text(
+                parts[0], chat_id=self._chat_id, message_id=self._fallback_message_id
+            )
+            for part in parts[1:]:
+                await self._bot.send_message(self._chat_id, part)
+            return edited if isinstance(edited, Message) else None
+        except TelegramAPIError as exc:
+            logger.info("tier-3 edit finalize failed, sending fresh message: %s", exc)
+            first: Message | None = None
+            try:
+                for part in parts:
+                    message = await self._bot.send_message(self._chat_id, part)
+                    if first is None:
+                        first = message
+            except TelegramAPIError:
+                logger.exception("finalize failed for chat %s", self._chat_id)
+            return first
 
     async def fail(self, user_message: str) -> None:
         """Сообщить пользователю об ошибке; ошибки отправки гасятся."""
