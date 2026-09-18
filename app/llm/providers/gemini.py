@@ -82,6 +82,48 @@ def _message_to_content(message: MessageDict) -> dict[str, Any]:
     return {"role": role, "parts": parts}
 
 
+# Gemini Function Declarations принимают только подмножество JSON Schema
+# (additionalProperties и прочие → 400 "Unknown name"). Чистим рекурсивно.
+_GEMINI_SCHEMA_KEYS = frozenset(
+    {
+        "type",
+        "format",
+        "title",
+        "description",
+        "nullable",
+        "enum",
+        "items",
+        "properties",
+        "required",
+        "minItems",
+        "maxItems",
+        "minimum",
+        "maximum",
+        "propertyOrdering",
+        "anyOf",
+    }
+)
+
+
+def sanitize_gemini_schema(schema: Any) -> Any:
+    """Оставить только поля, которые понимает Gemini Schema (рекурсивно).
+
+    Особый случай: под ключом `properties` лежат произвольные ИМЕНА свойств —
+    их нельзя фильтровать allowlist'ом, санитизируются только их подсхемы.
+    """
+    if isinstance(schema, list):
+        return [sanitize_gemini_schema(item) for item in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key == "properties" and isinstance(value, dict):
+            out[key] = {name: sanitize_gemini_schema(sub) for name, sub in value.items()}
+        elif key in _GEMINI_SCHEMA_KEYS:
+            out[key] = sanitize_gemini_schema(value)
+    return out
+
+
 def build_generate_content_payload(request: LLMRequest) -> dict[str, Any]:
     """LLMRequest → тело generateContent. temperature/top_p/top_k НЕ передаём."""
     payload: dict[str, Any] = {}
@@ -106,7 +148,7 @@ def build_generate_content_payload(request: LLMRequest) -> dict[str, Any]:
                     {
                         "name": tool.name,
                         "description": tool.description,
-                        "parameters": tool.parameters,
+                        "parameters": sanitize_gemini_schema(tool.parameters),
                     }
                     for tool in request.tools
                 ]

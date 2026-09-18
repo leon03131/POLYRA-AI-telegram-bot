@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Message, MessagePart
 
+_PART_COLUMNS = frozenset({"type", "text", "telegram_file_id", "mime_type", "metadata_json"})
+
 
 class MessageRepository:
     """Операции над Message/MessagePart. Commit/rollback — уровень сервисов/uow."""
@@ -23,10 +25,15 @@ class MessageRepository:
         parts: list[dict[str, Any]] | None = None,
         **fields: Any,
     ) -> Message:
-        """Создать сообщение и его части (position = индекс в списке parts)."""
+        """Создать сообщение и его части (position = индекс в списке parts).
+
+        Ключи part, которых нет среди колонок MessagePart (например data_base64 —
+        байты изображений в БД не храним), отбрасываются.
+        """
         message = Message(chat_id=chat_id, role=role, **fields)
         for position, part in enumerate(parts or []):
-            message.parts.append(MessagePart(position=position, **part))
+            safe_part = {k: v for k, v in part.items() if k in _PART_COLUMNS}
+            message.parts.append(MessagePart(position=position, **safe_part))
         self._session.add(message)
         await self._session.flush()
         return message

@@ -341,3 +341,49 @@ async def test_rate_limit_retry_after_from_retry_info() -> None:
         await _collect(provider, _request())
     assert exc_info.value.retry_after == 4.0
     assert exc_info.value.retryable is True
+
+def test_sanitize_gemini_schema_strips_unsupported_keys() -> None:
+    """additionalProperties/$schema и прочие не-Gemini ключи вырезаются рекурсивно."""
+    from app.llm.providers.gemini import sanitize_gemini_schema
+
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+            "query": {"type": "string", "description": "q"},
+            "nested": {
+                "type": "object",
+                "additionalProperties": True,
+                "properties": {"x": {"type": "integer", "minimum": 1}},
+            },
+        },
+        "required": ["query"],
+    }
+    cleaned = sanitize_gemini_schema(schema)
+    assert "additionalProperties" not in cleaned
+    assert "$schema" not in cleaned
+    assert cleaned["properties"]["nested"]["properties"]["x"] == {"type": "integer", "minimum": 1}
+    assert "additionalProperties" not in cleaned["properties"]["nested"]
+    assert cleaned["required"] == ["query"]
+
+
+def test_payload_tools_are_sanitized() -> None:
+    """В payload functionDeclarations не попадают неподдерживаемые ключи JSON Schema."""
+    request = _request(
+        tools=[
+            LLMTool(
+                name="web_search",
+                description="search",
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {"query": {"type": "string"}},
+                },
+            )
+        ]
+    )
+    payload = build_generate_content_payload(request)
+    params = payload["tools"][0]["functionDeclarations"][0]["parameters"]
+    assert "additionalProperties" not in params
+    assert params["properties"]["query"]["type"] == "string"

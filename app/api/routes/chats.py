@@ -147,6 +147,7 @@ async def patch_chat(
     if updated is None:  # pragma: no cover — чат только что проверен выше
         raise HTTPException(status_code=404, detail="chat not found")
     await session.commit()
+    await session.refresh(updated)  # гарантированно свежие значения для ответа
     current_chat_id = await ChatService(session).get_current_chat_id(user.id)
     return {"chat": _chat_out(updated, current_chat_id=current_chat_id)}
 

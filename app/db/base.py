@@ -1,6 +1,6 @@
 """Declarative base и общие mixin'ы ORM-моделей."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, MetaData, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -21,7 +21,12 @@ class Base(DeclarativeBase):
 
 
 class TimestampMixin:
-    """Колонки created_at/updated_at (timezone-aware, server_default now())."""
+    """Колонки created_at/updated_at (timezone-aware, server_default now()).
+
+    updated_at: onupdate вычисляется на стороне Python (а не SQL func.now()) —
+    иначе после UPDATE атрибут экспайрится и чтение после commit падает с
+    MissingGreenlet (ленивый refresh вне async-контекста).
+    """
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -31,6 +36,7 @@ class TimestampMixin:
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
-        onupdate=func.now(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
         nullable=False,
     )
