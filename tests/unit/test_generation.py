@@ -529,3 +529,72 @@ async def test_stream_loop_respects_max_iterations() -> None:
     outcome, tool_records = result
     assert len(tool_records) == 2  # ровно max_tool_iterations исполнений
     assert outcome.cancelled is False
+
+async def test_stream_loop_runs_tools_when_finish_stop_but_calls_present() -> None:
+    """Gemini-стиль: finish_reason='stop' + ToolCall в потоке → tools исполняются."""
+    calls: list[LLMRequest] = []
+
+    def fake_stream(request: LLMRequest) -> AsyncIterator[LLMEvent]:
+        calls.append(request)
+        if len(calls) == 1:
+            # КЛЮЧЕВОЕ: finish_reason НЕ tool_calls (как у Gemini)
+            return _stream_of(
+                [ToolCall(id="c1", name="echo", arguments_json='{"text": "hi"}'), Done("stop")]
+            )
+        return _stream_of([TextDelta("ответ"), Done("stop")])
+
+    async def echo_handler(args: dict, context: object) -> str:
+        return "echo: " + str(args["text"])
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="echo",
+            description="echo",
+            parameters={
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+            },
+            handler=echo_handler,
+        )
+    )
+    service = _service()
+    service._llm_stream = fake_stream
+    runner = ToolRunner(registry, session_factory=None)
+
+    result = await service._stream_loop(
+        _prepared_stub(),
+        FakeStreamer(),
+        llm_tools=None,
+        tool_runner=runner,
+        user=SimpleNamespace(id=uuid.uuid4()),
+        permissions=_permissions_stub(),
+        cancellation=asyncio.Event(),
+    )
+
+    assert result is not None
+    outcome, tool_records = result
+    assert len(tool_records) == 1  # tool исполнен несмотря на finish_reason=stop
+    assert outcome.text == "ответ"
+    assert len(calls) == 2  # второй раунд с результатом инструмента
+
+
+async def test_stream_loop_empty_final_text_gives_no_crash() -> None:
+    """Модель вернула пустой текст без tool calls — цикл завершается, текст пустой."""
+    service = _service()
+    service._llm_stream = lambda request: _stream_of([Done("stop")])
+
+    result = await service._stream_loop(
+        _prepared_stub(),
+        FakeStreamer(),
+        llm_tools=None,
+        tool_runner=None,
+        user=SimpleNamespace(id=uuid.uuid4()),
+        permissions=_permissions_stub(),
+        cancellation=asyncio.Event(),
+    )
+    assert result is not None
+    outcome, tool_records = result
+    assert outcome.text == ""
+    assert tool_records == []

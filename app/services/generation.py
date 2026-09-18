@@ -362,6 +362,17 @@ class GenerationService:
             final_outcome, tool_records = loop_result
             if final_outcome.cancelled:
                 await self._save_cancelled(prepared, final_outcome, bot=bot, tg_chat_id=tg_chat_id)
+            elif not final_outcome.text.strip():
+                # Модель завершилась без видимого текста (напр. весь вывод ушёл в
+                # мысли или потерянный tool call) — пользователь не должен молча
+                # ждать: честное сообщение вместо пустого ответа.
+                logger.warning(
+                    "empty final text (run %s, model %s)", prepared.run_id, prepared.model_id
+                )
+                await streamer.fail(
+                    f"🤔 {prepared.model_display} вернула пустой ответ. Попробуйте ещё раз."
+                )
+                await self._save_failed(prepared, ValueError("empty final text"))
             else:
                 sources = collect_sources(tool_records)
                 if sources and "Источники" not in final_outcome.text:
@@ -498,8 +509,14 @@ class GenerationService:
         tool_runner: ToolRunner | None,
         iterations: int,
     ) -> bool:
-        """Продолжать ли tool loop: есть вызовы, runner включён, лимит не достигнут."""
-        if outcome.finish_reason != "tool_calls" or not outcome.tool_calls:
+        """Продолжать ли tool loop.
+
+        Триггер — НАЛИЧИЕ tool_calls, а не finish_reason: Gemini в стриме шлёт
+        functionCall с finishReason=STOP (у него нет отдельной причины), OpenAI-
+        совместимые модели шлют finish_reason="tool_calls". Оба случая — по
+        факту наличия вызовов.
+        """
+        if not outcome.tool_calls:
             return False
         if tool_runner is None:
             logger.warning("модель запросила tools при отключённом tool engine")
