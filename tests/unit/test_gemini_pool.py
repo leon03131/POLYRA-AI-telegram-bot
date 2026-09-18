@@ -18,6 +18,7 @@ import pytest
 from app.llm.base import LLMRequest
 from app.llm.errors import (
     AuthError,
+    ForbiddenError,
     InvalidRequestError,
     RateLimitError,
     SafetyError,
@@ -331,6 +332,39 @@ async def test_401_disables_project_and_rotates() -> None:
     assert store.projects[0].enabled is False  # disable в сторе
     assert store.calls.set_cooldown == []
     assert provider.calls[1].metadata["api_key"] == "plain:enc:p2"
+
+
+async def test_403_permission_denied_disables_project() -> None:
+    """403 PERMISSION_DENIED (мёртвый Google-проект) → disable, а не cooldown-цикл."""
+    p1, p2 = _project("p1"), _project("p2")
+    pool, store, _ = _make_pool([p1, p2])
+    provider = FakeProvider()
+    provider.push(ForbiddenError("denied", raw_code="PERMISSION_DENIED"))
+    provider.push(TextDelta("ok"), Done("stop"))
+
+    events = await _collect(pool, provider)
+
+    assert events == [TextDelta("ok"), Done("stop")]
+    pid, code, _ = store.calls.mark_unhealthy[0]
+    assert (pid, code) == (p1.id, "PERMISSION_DENIED")
+    assert store.projects[0].enabled is False
+    assert store.calls.set_cooldown == []
+
+
+async def test_403_generic_gets_cooldown_not_disable() -> None:
+    """Прочий 403 (не PERMISSION_DENIED) → cooldown, проект остаётся включён."""
+    p1, p2 = _project("p1"), _project("p2")
+    pool, store, _ = _make_pool([p1, p2])
+    provider = FakeProvider()
+    provider.push(ForbiddenError("quota project issue", raw_code="FORBIDDEN"))
+    provider.push(TextDelta("ok"), Done("stop"))
+
+    events = await _collect(pool, provider)
+
+    assert events == [TextDelta("ok"), Done("stop")]
+    assert store.calls.mark_unhealthy == []
+    assert len(store.calls.set_cooldown) == 1
+    assert store.projects[0].enabled is True
 
 
 async def test_400_invalid_request_no_rotation() -> None:
