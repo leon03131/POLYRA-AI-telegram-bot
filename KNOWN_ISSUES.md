@@ -1,6 +1,14 @@
 # KNOWN ISSUES / риски на трекере
 
-Обновлено: 2026-09-18 (после M2).
+Обновлено: 2026-09-18 (после M11-M12 + live probe).
+
+**Live probe 2026-09-18 (реальные ключи владельца):**
+- Alibaba: 27/27 OK — все 5 моделей (text/stream/FC/image), все thinking-уровни приняты
+  (включая OFF у deepseek-v4.1-flash и kimi-k3), Kimi Dynamic Tool Loading РАБОТАЕТ на
+  MS endpoint (200 + tool_calls). probe_required снят с обеих моделей.
+- Gemini через proxy владельца: путь работает (gemini-3.6-flash ответила, usage корректен);
+  первые попытки дали 503 «high demand»/504 — транзиентно, pool-фейловер это покрывает.
+- qwen3.8-flash image: первичный fail был артефактом теста (1x1 px < минимума 10px у API).
 
 1. **Docker недоступен в dev-среде** — `alembic upgrade head` против живой PostgreSQL 16
    не выполнялся; миграции проверены только на загрузку (`alembic heads/history`).
