@@ -1,0 +1,158 @@
+{
+  "timestamp": "2026-09-18T12:35:10+00:00",
+  "gemini": {
+    "status": "skipped",
+    "error": "не выбран (--provider)"
+  },
+  "alibaba": {
+    "status": "ok",
+    "models": {
+      "qwen3.8-flash": {
+        "checks": {
+          "text_stream": {
+            "status": "ok",
+            "detail": "done=stop, chars=2, tokens in/out/reason=67/51/47"
+          },
+          "thinking:off": {
+            "status": "ok",
+            "detail": "accepted, без ReasoningDelta, done=stop"
+          },
+          "thinking:low": {
+            "status": "ok",
+            "detail": "accepted, ReasoningDelta x10, done=stop"
+          },
+          "thinking:medium": {
+            "status": "ok",
+            "detail": "accepted, ReasoningDelta x8, done=stop"
+          },
+          "thinking:max": {
+            "status": "ok",
+            "detail": "accepted, ReasoningDelta x15, done=stop"
+          },
+          "function_calling": {
+            "status": "ok",
+            "detail": "ToolCall echo, args={\"text\": \"привет\"}"
+          },
+          "image": {
+            "status": "fail",
+            "detail": "category=invalid_request, http=400, raw_code=invalid_parameter_error, <400> InternalError.Algo.InvalidParameter: The image length and width do not meet the model restrictions. [height:1 or width:1 must be larger than 10]"
+          }
+        },
+        "notes": []
+      },
+      "deepseek-v4.1-flash": {
+        "checks": {
+          "text_stream": {
+            "status": "ok",
+            "detail": "done=stop, chars=2, tokens in/out/reason=36/92/90"
+          },
+          "thinking:off": {
+            "status": "ok",
+            "detail": "accepted, без ReasoningDelta, done=stop"
+          },
+          "thinking:low": {
+            "status": "ok",
+            "detail": "accepted, ReasoningDelta x10, done=stop"
+          },
+          "thinking:high": {
+            "status": "ok",
+            "detail": "accepted, ReasoningDelta x13, done=stop"
+          },
+          "thinking:max": {
+            "status": "ok",
+            "detail": "accepted, ReasoningDelta x19, done=stop"
+          },
+          "function_calling": {
+            "status": "ok",
+            "detail": "ToolCall echo, args={\"text\": \"привет\"}"
+          },
+          "image": {
+            "status": "ok",
+            "detail": "TextDelta приходит (chars=7), done=stop"
+          }
+        },
+        "notes": [
+          "thinking off помечен probe_required в capabilities — см. thinking:off"
+        ]
+      },
+      "glm-5.3": {
+        "checks": {
+          "text_stream": {
+            "status": "ok",
+            "detail": "done=stop, chars=2, tokens in/out/reason=18/3/0"
+          },
+          "thinking:low": {
+            "status": "ok",
+            "detail": "accepted, без ReasoningDelta, done=stop"
+          },
+          "thinking:high": {
+            "status": "ok",
+            "detail": "accepted, без ReasoningDelta, done=stop"
+          },
+          "thinking:max": {
+            "status": "ok",
+            "detail": "accepted, ReasoningDelta x40, done=stop"
+          },
+          "function_calling": {
+            "status": "ok",
+            "detail": "ToolCall echo, args={\"text\": \"привет\"}"
+          },
+          "image": {
+            "status": "skipped",
+            "detail": "vision не поддерживается (registry input_modalities)"
+          }
+        },
+        "notes": []
+      },
+      "kimi-k3": {
+        "checks": {
+          "text_stream": {
+            "status": "ok",
+            "detail": "done=stop, chars=2, tokens in/out/reason=92/95/78"
+          },
+          "thinking:off": {
+            "status": "ok",
+            "detail": "accepted, без ReasoningDelta, done=stop"
+          },
+          "thinking:low": {
+            "status": "fail",
+            "detail": "rejected: category=invalid_request, http=400, raw_code=invalid_parameter_error, <400> InternalError.Algo.InvalidParameter: max_completion_tokens [1024] must be greater than thinking_budget [8192]"
+          },
+          "thinking:high": {
+            "status": "ok",
+            "detail": "accepted, ReasoningDelta x7, done=stop"
+          },
+          "thinking:max": {
+            "status": "ok",
+            "detail": "accepted, ReasoningDelta x22, done=stop"
+          },
+          "function_calling": {
+            "status": "ok",
+            "detail": "ToolCall echo, args={\"text\": \"привет\"}"
+          },
+          "image": {
+            "status": "ok",
+            "detail": "TextDelta приходит (chars=83), done=stop"
+          },
+          "dtl_system_tools": {
+            "status": "ok",
+            "detail": "200 + tool_calls ['echo'] — DTL на этом endpoint работает"
+          }
+        },
+        "notes": [
+          "thinking off помечен probe_required в capabilities — см. thinking:off",
+          "DTL проверен raw-запросом: tools внутри system, без top-level tools"
+        ]
+      }
+    },
+    "key_source": "--alibaba-key (CLI)",
+    "key_mask": "sk-4...4054",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "recommendations": [
+      "qwen3.8-flash: показывать [off, low, medium, max]; отклонены [—]; OFF принят",
+      "deepseek-v4.1-flash: показывать [off, low, high, max]; отклонены [—]; OFF принят",
+      "glm-5.3: показывать [low, high, max]; отклонены [—]",
+      "kimi-k3: показывать [off, high, max]; отклонены [low]; OFF принят"
+    ]
+  }
+}

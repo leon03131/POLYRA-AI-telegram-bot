@@ -122,7 +122,7 @@ ALIBABA_MODELS: tuple[ModelDefinition, ...] = (
         input_modalities=frozenset({"text", "image"}),
         thinking_modes=(THINKING_OFF, THINKING_LOW, THINKING_HIGH, THINKING_MAX),
         default_thinking=None,
-        probe_required=frozenset({THINKING_OFF}),  # противоречие доков по default/OFF
+        # probe 2026-09-18: OFF (enable_thinking=false) принят endpoint'ом.
     ),
     ModelDefinition(
         provider="alibaba",
@@ -144,9 +144,8 @@ ALIBABA_MODELS: tuple[ModelDefinition, ...] = (
         input_modalities=frozenset({"text", "image"}),
         thinking_modes=(THINKING_OFF, THINKING_LOW, THINKING_HIGH, THINKING_MAX),
         default_thinking=THINKING_MAX,
-        # OFF противоречив между MS и Moonshot доками; max_output=1M на странице — сомнителен,
-        # держим безопасные 131072 до probe.
-        probe_required=frozenset({THINKING_OFF}),
+        # probe 2026-09-18: OFF принят; DTL (system+tools без content) работает
+        # на MS endpoint. max_output=1M на странице модели — не доверяем, 131072.
         provider_options={"image_url_requires_base64": True},  # Moonshot: публичные URL запрещены
     ),
 )

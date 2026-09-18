@@ -183,7 +183,11 @@ async def test_models_excludes_internal_and_probe_modes() -> None:
     model_ids = {model["model_id"] for model in models}
     assert "gemini-3.5-flash-lite" not in model_ids  # internal_only
     kimi = next(model for model in models if model["model_id"] == "kimi-k3")
-    assert "off" not in kimi["thinking_modes"]  # probe_required исключён
+    # probe 2026-09-18 подтвердил OFF на MS endpoint — режим доступен в UI
+    assert "off" in kimi["thinking_modes"]
+    # probe_required-режимы скрываются до подтверждения (на текущий момент таких нет)
+    for model in models:
+        assert not (set(model["thinking_modes"]) & set(model.get("probe_required") or ()))
     for model in models:
         assert set(model) == {
             "model_id",

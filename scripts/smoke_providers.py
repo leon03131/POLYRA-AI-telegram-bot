@@ -58,10 +58,10 @@ logger = logging.getLogger("smoke_providers")
 # Таймауты probe-запросов (короче продакшн-дефолтов провайдеров: там read=300).
 _TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=30.0)
 
-# 1x1 transparent PNG (68 байт).
+# 32x32 PNG (минимум Alibaba: стороны > 10 px — 1x1 отклоняется с invalid_parameter).
 _PNG_1X1_BASE64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9aw"
-    "AAAABJRU5ErkJggg=="
+    "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKUlEQVR4nO3NsQkAAAzDsJye00uP6FAQ9q40"
+    "PX0DAAAAAAAAAAAA+QAMd+8APdkyBqwAAAAASUVORK5CYII="
 )
 
 _GEMINI_MODELS = ("gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite")
@@ -220,7 +220,10 @@ async def _check_thinking_level(
     if api_key is not None:
         request = _gemini_request(model, api_key, messages, thinking=level, max_output_tokens=512)
     else:
-        request = LLMRequest(model=model, messages=messages, thinking=level, max_output_tokens=1024)
+        # reasoning budget (напр. kimi low=8192) не должен превышать лимит ответа
+        request = LLMRequest(
+            model=model, messages=messages, thinking=level, max_output_tokens=16384
+        )
     try:
         summary = await _collect(provider, request)
     except InvalidRequestError as exc:
@@ -236,7 +239,7 @@ async def _check_thinking_level(
 async def _check_image(
     provider: LLMProvider, model: str, *, api_key: str | None = None
 ) -> CheckResult:
-    """1x1 PNG base64 → ожидаем текстовый ответ (TextDelta)."""
+    """32x32 PNG base64 → ожидаем текстовый ответ (TextDelta)."""
     message: MessageDict = {
         "role": "user",
         "parts": [
@@ -247,7 +250,7 @@ async def _check_image(
     if api_key is not None:
         request = _gemini_request(model, api_key, [message], max_output_tokens=512)
     else:
-        request = LLMRequest(model=model, messages=[message], max_output_tokens=1024)
+        request = LLMRequest(model=model, messages=[message], max_output_tokens=16384)
     summary = await _collect(provider, request)
     if summary.text_deltas:
         return _ok(f"TextDelta приходит (chars={summary.text_chars}), done={summary.done_reason}")

@@ -26,3 +26,5 @@ miniapp/dist/
 # OS
 .DS_Store
 Thumbs.db
+
+gemini_keys.txt
