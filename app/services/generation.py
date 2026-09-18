@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot.streaming.draft import MESSAGE_LIMIT, DraftStreamer, new_draft_id
@@ -818,30 +819,37 @@ class GenerationService:
                     "metadata_json": {"name": call.name, "status": execution.status},
                 }
             )
-        async with self._session_factory() as session:
-            await MessageRepository(session).add_message(
-                prepared.chat_id,
-                "assistant",
-                parts=parts,
-                status="done",
-                provider=prepared.provider,
-                model_id=prepared.model_id,
-                generation_run_id=prepared.run_id,
-                input_tokens=usage.input_tokens if usage else None,
-                output_tokens=usage.output_tokens if usage else None,
-                reasoning_tokens=usage.reasoning_tokens if usage else None,
+        try:
+            async with self._session_factory() as session:
+                await MessageRepository(session).add_message(
+                    prepared.chat_id,
+                    "assistant",
+                    parts=parts,
+                    status="done",
+                    provider=prepared.provider,
+                    model_id=prepared.model_id,
+                    generation_run_id=prepared.run_id,
+                    input_tokens=usage.input_tokens if usage else None,
+                    output_tokens=usage.output_tokens if usage else None,
+                    reasoning_tokens=usage.reasoning_tokens if usage else None,
+                )
+                await ChatRepository(session).touch(prepared.chat_id)
+                await GenerationRunRepository(session).finish(
+                    prepared.run_id,
+                    status="completed",
+                    first_token_at=outcome.first_token_at,
+                    input_tokens=usage.input_tokens if usage else None,
+                    output_tokens=usage.output_tokens if usage else None,
+                    reasoning_tokens=usage.reasoning_tokens if usage else None,
+                    tool_calls_count=outcome.tool_calls_count,
+                )
+                await session.commit()
+        except IntegrityError:
+            # Чат удалён в Mini App прямо во время генерации: FK на chats.
+            # Ответ пользователь уже получил (finalize до сохранения) — просто лог.
+            logger.warning(
+                "chat %s удалён во время генерации — пропускаю персистенс", prepared.chat_id
             )
-            await ChatRepository(session).touch(prepared.chat_id)
-            await GenerationRunRepository(session).finish(
-                prepared.run_id,
-                status="completed",
-                first_token_at=outcome.first_token_at,
-                input_tokens=usage.input_tokens if usage else None,
-                output_tokens=usage.output_tokens if usage else None,
-                reasoning_tokens=usage.reasoning_tokens if usage else None,
-                tool_calls_count=outcome.tool_calls_count,
-            )
-            await session.commit()
 
     async def _save_cancelled(
         self,
@@ -860,27 +868,33 @@ class GenerationService:
             except TelegramAPIError:
                 logger.exception("не удалось отправить partial в чат %s", tg_chat_id)
         usage = outcome.usage
-        async with self._session_factory() as session:
-            await MessageRepository(session).add_message(
-                prepared.chat_id,
-                "assistant",
-                parts=[{"type": "text", "text": partial}],
-                status="cancelled",
-                provider=prepared.provider,
-                model_id=prepared.model_id,
-                generation_run_id=prepared.run_id,
-                input_tokens=usage.input_tokens if usage else None,
-                output_tokens=usage.output_tokens if usage else None,
-                reasoning_tokens=usage.reasoning_tokens if usage else None,
+        try:
+            async with self._session_factory() as session:
+                await MessageRepository(session).add_message(
+                    prepared.chat_id,
+                    "assistant",
+                    parts=[{"type": "text", "text": partial}],
+                    status="cancelled",
+                    provider=prepared.provider,
+                    model_id=prepared.model_id,
+                    generation_run_id=prepared.run_id,
+                    input_tokens=usage.input_tokens if usage else None,
+                    output_tokens=usage.output_tokens if usage else None,
+                    reasoning_tokens=usage.reasoning_tokens if usage else None,
+                )
+                await ChatRepository(session).touch(prepared.chat_id)
+                await GenerationRunRepository(session).finish(
+                    prepared.run_id,
+                    status="cancelled",
+                    first_token_at=outcome.first_token_at,
+                    tool_calls_count=outcome.tool_calls_count,
+                )
+                await session.commit()
+        except IntegrityError:
+            # Чат удалён во время генерации — partial уже отправлен, персистенс пропускаем.
+            logger.warning(
+                "chat %s удалён во время генерации — пропускаю персистенс", prepared.chat_id
             )
-            await ChatRepository(session).touch(prepared.chat_id)
-            await GenerationRunRepository(session).finish(
-                prepared.run_id,
-                status="cancelled",
-                first_token_at=outcome.first_token_at,
-                tool_calls_count=outcome.tool_calls_count,
-            )
-            await session.commit()
 
     async def _save_failed(self, prepared: _PreparedGeneration, exc: BaseException) -> None:
         """Финал ошибки: run failed (category/code); assistant message не создаётся."""

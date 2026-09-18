@@ -112,7 +112,17 @@ async def _web_search_handler(args: dict[str, Any], context: ToolContext) -> str
         country="ru",
         mode=args.get("mode", "auto"),
     )
-    outcome = await manager.search(args["query"], options)
+    try:
+        outcome = await manager.search(args["query"], options)
+    except Exception as exc:
+        # Поиск недоступен/все бэкенды упали — говорим модели НЕ ретраить,
+        # иначе tool loop уходит в цикл до max_tool_iterations.
+        if type(exc).__name__ == "SearchBackendError":
+            raise ToolExecutionError(
+                "Веб-поиск сейчас недоступен. НЕ вызывай web_search повторно — "
+                "ответь пользователю по своим знаниям и скажи, что поиск недоступен."
+            ) from exc
+        raise
     return _format_search_outcome(outcome)
 
 
