@@ -1,5 +1,14 @@
 # KNOWN ISSUES / риски на трекере
 
+## Deployment (2026-09-18, VPS 72.56.252.97)
+
+- **Хостер фильтрует часть api.telegram.org**: 149.154.166.110/175.53/161.20 — DROP,
+  149.154.167.220 — работает. Решение: `extra_hosts` pin в docker-compose.yml (app service).
+  Если Telegram сменит/заблокирует этот IP — убрать pin или настроить TELEGRAM_PROXY (WARP).
+  WARP-вариант заготовлен но НЕ активирован: Cloudflare /reg отвечает 429 с IP хостера
+  (wgcf + wireproxy лежат на сервере в /usr/local/bin, профиль не создан).
+- Остальные сети с VPS (google/github/netlify/dashscope) — работают напрямую.
+
 Обновлено: 2026-09-18 (после M11-M12 + live probe).
 
 **Live probe 2026-09-18 (реальные ключи владельца):**
