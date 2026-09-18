@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import inspect
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Protocol
@@ -90,7 +91,7 @@ class GeminiProjectPool:
         self,
         *,
         store: ProjectStore,
-        quota_for_model: Callable[[str], QuotaTracker],
+        quota_for_model: Callable[[str], QuotaTracker | Awaitable[QuotaTracker]],
         decrypt: Callable[[str], str],
         cooldown_429: float = 60.0,
         cooldown_403: float = 300.0,
@@ -103,6 +104,13 @@ class GeminiProjectPool:
         self._cooldown_403 = cooldown_403
         self._cooldown_transient = cooldown_transient
         self._rr_counter = 0  # in-memory round-robin offset
+
+    async def _resolve_quota(self, model_id: str) -> QuotaTracker:
+        """Фабрика quota может быть sync или async (DB-вариант) — поддерживаем оба."""
+        tracker = self._quota_for_model(model_id)
+        if inspect.isawaitable(tracker):
+            return await tracker
+        return tracker
 
     async def acquire(
         self, model_id: str, *, exclude: set[UUID] | None = None, now: datetime
@@ -123,7 +131,7 @@ class GeminiProjectPool:
             return None
         start = self._rr_counter % len(candidates)
         self._rr_counter += 1
-        quota = self._quota_for_model(model_id)
+        quota = await self._resolve_quota(model_id)
         for offset in range(len(candidates)):
             project = candidates[(start + offset) % len(candidates)]
             if await quota.check_and_reserve(project.id, model_id, now=now):
@@ -143,9 +151,8 @@ class GeminiProjectPool:
         """Успех: mark_success; при известном usage — reconcile input-токенов."""
         await self._store.mark_success(project_id)
         if input_tokens is not None:
-            await self._quota_for_model(model_id).reconcile(
-                project_id, model_id, input_tokens=input_tokens, now=now
-            )
+            quota = await self._resolve_quota(model_id)
+            await quota.reconcile(project_id, model_id, input_tokens=input_tokens, now=now)
 
     async def report_error(
         self, project_id: UUID, model_id: str, error: ProviderError, *, now: datetime

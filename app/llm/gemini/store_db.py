@@ -142,7 +142,7 @@ def build_gemini_pool(
     decrypt: Callable[[str], str] = crypto.decrypt
     pool = GeminiProjectPool(
         store=store,
-        quota_for_model=quota_for_model,  # type: ignore[arg-type]
+        quota_for_model=quota_for_model,
         decrypt=decrypt,
     )
     return pool

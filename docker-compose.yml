@@ -38,6 +38,10 @@ services:
       API_HOST: 0.0.0.0
     ports:
       - "${APP_PORT:-8080}:8080"
+    # Workaround: hoster's network drops some api.telegram.org IPs.
+    # Pin a reachable Telegram endpoint (see KNOWN_ISSUES). Remove when unneeded.
+    extra_hosts:
+      - "api.telegram.org:149.154.167.220"
     depends_on:
       postgres:
         condition: service_healthy
