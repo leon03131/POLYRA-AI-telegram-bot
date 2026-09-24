@@ -374,7 +374,7 @@ class GenerationService:
                 )
                 await self._save_failed(prepared, ValueError("empty final text"))
             else:
-                sources = collect_sources(tool_records)
+                sources = collect_sources(tool_records) if self._settings.show_sources else []
                 if sources and "Источники" not in final_outcome.text:
                     suffix = build_sources_suffix(sources)
                     await streamer.append(suffix)
