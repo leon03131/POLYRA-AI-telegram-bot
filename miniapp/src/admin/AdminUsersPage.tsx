@@ -60,6 +60,9 @@ function GrantModal({ user, mode, onClose }: GrantModalProps) {
   const [rpd, setRpd] = useState(grant?.requests_per_day?.toString() ?? "");
   const [tokenLimit, setTokenLimit] = useState(grant?.token_limit?.toString() ?? "");
   const [maxConc, setMaxConc] = useState(grant?.max_concurrent_generations?.toString() ?? "");
+  const [clearRpd, setClearRpd] = useState(false);
+  const [clearTokenLimit, setClearTokenLimit] = useState(false);
+  const [clearMaxConc, setClearMaxConc] = useState(false);
   const [web, setWeb] = useState(grant?.can_use_web_search ?? true);
   const [memory, setMemory] = useState(grant?.can_use_memory ?? true);
   const [note, setNote] = useState("");
@@ -92,15 +95,19 @@ function GrantModal({ user, mode, onClose }: GrantModalProps) {
       save.mutate({ telegram_user_id: user.telegram_user_id, expires_at });
       return;
     }
+    // Backend (exclude_unset): поле отсутствует → не менять; явный null → снять лимит.
     const body: GrantBody = {
       telegram_user_id: user.telegram_user_id,
       expires_at,
-      requests_per_day: numOrNull(rpd),
-      token_limit: numOrNull(tokenLimit),
-      max_concurrent_generations: numOrNull(maxConc),
       can_use_web_search: web,
       can_use_memory: memory,
     };
+    if (clearRpd) body.requests_per_day = null;
+    else if (rpd.trim()) body.requests_per_day = numOrNull(rpd);
+    if (clearTokenLimit) body.token_limit = null;
+    else if (tokenLimit.trim()) body.token_limit = numOrNull(tokenLimit);
+    if (clearMaxConc) body.max_concurrent_generations = null;
+    else if (maxConc.trim()) body.max_concurrent_generations = numOrNull(maxConc);
     if (note.trim()) body.note = note.trim();
     save.mutate(body);
   };
@@ -135,21 +142,58 @@ function GrantModal({ user, mode, onClose }: GrantModalProps) {
       {mode === "grant" && (
         <>
           <div className="form-row" style={{ padding: 0 }}>
-            <label className="form-label">Запросов в день (пусто — без лимита)</label>
-            <Input type="number" min={1} value={rpd} onChange={(e) => setRpd(e.target.value)} />
+            <label className="form-label">Запросов в день (пусто — без изменений)</label>
+            <Input
+              type="number"
+              min={1}
+              value={rpd}
+              disabled={clearRpd}
+              onChange={(e) => setRpd(e.target.value)}
+            />
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={clearRpd}
+                onChange={(e) => setClearRpd(e.target.checked)}
+              />
+              <span>Без лимита (снять)</span>
+            </label>
           </div>
           <div className="form-row" style={{ padding: 0 }}>
-            <label className="form-label">Токен-лимит (пусто — без лимита)</label>
+            <label className="form-label">Токен-лимит (пусто — без изменений)</label>
             <Input
               type="number"
               min={1}
               value={tokenLimit}
+              disabled={clearTokenLimit}
               onChange={(e) => setTokenLimit(e.target.value)}
             />
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={clearTokenLimit}
+                onChange={(e) => setClearTokenLimit(e.target.checked)}
+              />
+              <span>Без лимита (снять)</span>
+            </label>
           </div>
           <div className="form-row" style={{ padding: 0 }}>
-            <label className="form-label">Макс. параллельных генераций</label>
-            <Input type="number" min={1} value={maxConc} onChange={(e) => setMaxConc(e.target.value)} />
+            <label className="form-label">Макс. параллельных генераций (пусто — без изменений)</label>
+            <Input
+              type="number"
+              min={1}
+              value={maxConc}
+              disabled={clearMaxConc}
+              onChange={(e) => setMaxConc(e.target.value)}
+            />
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={clearMaxConc}
+                onChange={(e) => setClearMaxConc(e.target.checked)}
+              />
+              <span>Без лимита (снять)</span>
+            </label>
           </div>
           <div className="form-row inline" style={{ padding: 0 }}>
             <span>Веб-поиск</span>

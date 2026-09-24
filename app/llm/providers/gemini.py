@@ -227,7 +227,12 @@ def _events_from_chunk(chunk: dict[str, Any]) -> list[LLMEvent]:
 
 
 async def parse_generate_content_sse(lines: AsyncIterator[str]) -> AsyncIterator[LLMEvent]:
-    """SSE-строки → события. Пустые/не-data/битый JSON — пропускаем, [DONE] — стоп."""
+    """SSE-строки → события. Пустые/не-data/битый JSON — пропускаем, [DONE] — стоп.
+
+    Контракт FIX_V2 §1: поток обязан завершиться терминальным Done. EOF без
+    Done (обрыв соединения/битый поток) — NetworkError (unexpected EOF),
+    а не молчаливый успех. Отмена обрабатывается вызывающим (stream_chat)."""
+    terminal_seen = False
     async for line in lines:
         if not line.startswith("data:"):
             continue
@@ -235,7 +240,8 @@ async def parse_generate_content_sse(lines: AsyncIterator[str]) -> AsyncIterator
         if not data:
             continue
         if data == "[DONE]":
-            return
+            terminal_seen = True  # sentinel — валидный терминальный маркер
+            break
         try:
             chunk = json.loads(data)
         except json.JSONDecodeError:
@@ -243,7 +249,11 @@ async def parse_generate_content_sse(lines: AsyncIterator[str]) -> AsyncIterator
             continue
         if isinstance(chunk, dict):
             for event in _events_from_chunk(chunk):
+                if isinstance(event, Done):
+                    terminal_seen = True
                 yield event
+    if not terminal_seen:
+        raise NetworkError("unexpected EOF: gemini stream ended without finishReason")
 
 
 def _parse_retry_delay(value: Any) -> float | None:
@@ -315,10 +325,16 @@ class GeminiProvider:
                 if response.status_code >= 400:
                     body = await response.aread()
                     raise _error_from_response(response.status_code, body)
-                async for event in parse_generate_content_sse(
-                    self._lines_with_cancellation(response, request)
-                ):
-                    yield event
+                try:
+                    async for event in parse_generate_content_sse(
+                        self._lines_with_cancellation(response, request)
+                    ):
+                        yield event
+                except NetworkError:
+                    # Отмена (cancellation) завершает поток без Done — это НЕ ошибка.
+                    if request.cancellation.is_set():
+                        return
+                    raise
         except httpx.TimeoutException as exc:
             raise TimeoutError_(f"gemini timeout: {type(exc).__name__}") from exc
         except httpx.TransportError as exc:

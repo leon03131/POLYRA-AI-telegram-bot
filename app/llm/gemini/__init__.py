@@ -13,6 +13,7 @@ from app.llm.gemini.pool import (
 from app.llm.gemini.quota import (
     PACIFIC,
     QuotaLimits,
+    QuotaReservation,
     QuotaStore,
     QuotaTracker,
     UsageSnapshot,
@@ -28,6 +29,7 @@ __all__ = [
     "ProjectInfo",
     "ProjectStore",
     "QuotaLimits",
+    "QuotaReservation",
     "QuotaStore",
     "QuotaTracker",
     "UsageSnapshot",

@@ -48,12 +48,13 @@ export interface ModelsResponse {
 export type WebMode = "off" | "auto" | "on";
 
 export interface Chat {
-  id: number;
+  id: string;
   title: string | null;
   model_id: string | null;
   thinking_setting: string | null;
   web_mode: string | null;
   memory_enabled: boolean | null;
+  system_prompt_override: string | null;
   created_at: string;
   updated_at: string;
   archived_at: string | null;
@@ -62,6 +63,11 @@ export interface Chat {
 
 export interface ChatsResponse {
   chats: Chat[];
+  total: number;
+}
+
+export interface ChatResponse {
+  chat: Chat;
 }
 
 /** PATCH /api/chats/{id}: null/отсутствие = inherit от user defaults. */
@@ -89,7 +95,7 @@ export interface SettingsPatch {
 }
 
 export interface MemoryItem {
-  id: number;
+  id: string;
   text: string;
   category: string;
   importance: number;
@@ -99,6 +105,7 @@ export interface MemoryItem {
 
 export interface MemoriesResponse {
   memories: MemoryItem[];
+  total: number;
 }
 
 export interface MemoryPatch {
@@ -148,7 +155,7 @@ export interface GrantBody {
 }
 
 export interface GeminiProject {
-  id: number;
+  id: string;
   name: string;
   key_hint: string;
   enabled: boolean;
@@ -213,10 +220,15 @@ export interface AdminStats {
   tokens_today: { input: number; output: number };
   gemini_projects: { total: number; enabled: number; healthy: number };
   tool_calls_today: number;
+  // V2 additions (могут отсутствовать на старом backend — рендерим условно)
+  requests_by_model_today?: Record<string, number>;
+  errors_today?: number;
+  rate_limit_429_today?: number;
+  gemini_usage_today?: { project_name: string; requests: number; tokens_in: number }[];
 }
 
 export interface AuditEntry {
-  id: number;
+  id: string;
   actor_telegram_id: number;
   action: string;
   target_type: string;
@@ -227,4 +239,56 @@ export interface AuditEntry {
 
 export interface AuditResponse {
   entries: AuditEntry[];
+  total: number;
+}
+
+// ---------- V2 additions (2026-09-24) ----------
+
+export interface AdminModel {
+  model_id: string;
+  display_name: string;
+  provider: string;
+  enabled: boolean;
+  internal_only: boolean;
+  supports_images: boolean;
+  thinking_modes: string[];
+  default_thinking: string | null;
+  max_context: number;
+  max_output: number;
+}
+
+export interface AdminModelsResponse {
+  models: AdminModel[];
+}
+
+export interface ProviderTestResult {
+  ok: boolean;
+  latency_ms: number;
+  error: string | null;
+}
+
+export interface GeminiUsageMinute {
+  project_name: string;
+  model_id: string;
+  minute_ts: string;
+  requests_count: number;
+  tokens_in: number;
+}
+
+export interface GeminiUsageDaily {
+  project_name: string;
+  model_id: string;
+  day: string;
+  requests_count: number;
+  tokens_in: number;
+}
+
+export interface GeminiUsageResponse {
+  minute: GeminiUsageMinute[];
+  daily: GeminiUsageDaily[];
+}
+
+export interface AdminMemoriesResponse {
+  memories: MemoryItem[];
+  total: number;
 }

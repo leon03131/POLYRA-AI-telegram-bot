@@ -5,6 +5,11 @@
 пока не эмитнуто ни одного события. Ключ подставляется в запрос через
 request.metadata["api_key"] (ADR-015) — провайдер остаётся stateless.
 
+A10: cooldown 429 — per (project, model) in-memory (DB-колонка cooldown_until
+остаётся project-level: схему меняет владелец G); server/network/timeout —
+один bounded-retry того же проекта (задержка retry_delay) перед ротацией,
+только пока не эмитнуто ни одного события.
+
 Хранилище состояния проектов — за Protocol ProjectStore (PostgreSQL пишется
 отдельным агентом); пул зависит только от интерфейсов.
 """
@@ -25,12 +30,17 @@ from uuid import UUID
 from app.llm.base import LLMRequest
 from app.llm.errors import ErrorCategory, ProviderError
 from app.llm.events import Done, LLMEvent, Usage
-from app.llm.gemini.quota import QuotaTracker
+from app.llm.gemini.quota import QuotaReservation, QuotaTracker, current_minute, pacific_day
 from app.llm.providers.gemini import GeminiProvider
 
 logger = logging.getLogger(__name__)
 
 _MAX_ERROR_MESSAGE = 256
+
+# A10: категории с одним повтором того же проекта перед ротацией (pre-event).
+_RETRY_SAME_PROJECT = frozenset(
+    {ErrorCategory.SERVER, ErrorCategory.NETWORK, ErrorCategory.TIMEOUT}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,11 +80,16 @@ class ProjectStore(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class PooledCredential:
-    """Выданный пулом ключ проекта (уже расшифрованный)."""
+    """Выданный пулом ключ проекта (уже расшифрованный).
+
+    quota_reservation — окна квоты момента выдачи (A09); report_success
+    reconcile'ит токены строго в них, а не в окна «текущего» момента.
+    """
 
     project_id: UUID
     name: str
     api_key: str
+    quota_reservation: QuotaReservation | None = None
 
 
 class PoolExhaustedError(Exception):
@@ -97,6 +112,7 @@ class GeminiProjectPool:
         cooldown_429: float = 60.0,
         cooldown_403: float = 300.0,
         cooldown_transient: float = 30.0,
+        retry_delay: float = 0.5,
     ) -> None:
         self._store = store
         self._quota_for_model = quota_for_model
@@ -104,7 +120,10 @@ class GeminiProjectPool:
         self._cooldown_429 = cooldown_429
         self._cooldown_403 = cooldown_403
         self._cooldown_transient = cooldown_transient
+        self._retry_delay = retry_delay
         self._rr_counter = 0  # in-memory round-robin offset
+        # A10: 429-cooldown per (project, model) — process-local, БД-схему не меняем.
+        self._model_cooldowns: dict[tuple[UUID, str], datetime] = {}
 
     async def _resolve_quota(self, model_id: str) -> QuotaTracker:
         """Фабрика quota может быть sync или async (DB-вариант) — поддерживаем оба."""
@@ -118,7 +137,9 @@ class GeminiProjectPool:
     ) -> PooledCredential | None:
         """Выдать ключ: enabled, без активного cooldown, вне exclude, квота не исчерпана.
 
-        Обход кандидатов кольцом от round-robin offset; None — подходящих нет.
+        Cooldown-фильтры: project-level из БД (cooldown_until) + in-memory
+        per (project, model) для 429 (A10). Обход кандидатов кольцом от
+        round-robin offset; None — подходящих нет.
         """
         excluded = exclude or set()
         candidates = [
@@ -127,6 +148,7 @@ class GeminiProjectPool:
             if p.enabled
             and p.id not in excluded
             and (p.cooldown_until is None or p.cooldown_until <= now)
+            and not self._model_cooldown_active(p.id, model_id, now)
         ]
         if not candidates:
             return None
@@ -135,33 +157,63 @@ class GeminiProjectPool:
         quota = await self._resolve_quota(model_id)
         for offset in range(len(candidates)):
             project = candidates[(start + offset) % len(candidates)]
-            if await quota.check_and_reserve(project.id, model_id, now=now):
+            reservation = await quota.check_and_reserve(project.id, model_id, now=now)
+            if reservation is not None:
                 return PooledCredential(
                     project_id=project.id,
                     name=project.name,
                     api_key=self._decrypt(project.encrypted_api_key),
+                    quota_reservation=reservation,
                 )
             logger.info(
                 "gemini pool: проект %s пропущен — квота %s исчерпана", project.name, model_id
             )
         return None
 
+    def _model_cooldown_active(self, project_id: UUID, model_id: str, now: datetime) -> bool:
+        """Активен ли in-memory 429-cooldown для (project, model); протухший удаляется."""
+        until = self._model_cooldowns.get((project_id, model_id))
+        if until is None:
+            return False
+        if until <= now:
+            del self._model_cooldowns[(project_id, model_id)]
+            return False
+        return True
+
     async def report_success(
-        self, project_id: UUID, model_id: str, *, input_tokens: int | None, now: datetime
+        self,
+        project_id: UUID,
+        model_id: str,
+        *,
+        input_tokens: int | None,
+        now: datetime,
+        reservation: QuotaReservation | None = None,
     ) -> None:
-        """Успех: mark_success; при известном usage — reconcile input-токенов."""
+        """Успех: mark_success; при известном usage — reconcile input-токенов.
+
+        reconcile идёт в окна РЕЗЕРВАЦИИ (A09); reservation=None (вызов вне
+        acquire) — fallback на окна момента `now`.
+        """
         await self._store.mark_success(project_id)
         if input_tokens is not None:
             quota = await self._resolve_quota(model_id)
-            await quota.reconcile(project_id, model_id, input_tokens=input_tokens, now=now)
+            if reservation is None:
+                reservation = QuotaReservation(
+                    project_id=project_id,
+                    model_id=model_id,
+                    minute_ts=current_minute(now),
+                    day=pacific_day(now),
+                )
+            await quota.reconcile(reservation, input_tokens=input_tokens)
 
     async def report_error(
         self, project_id: UUID, model_id: str, error: ProviderError, *, now: datetime
     ) -> None:
         """Классификация ошибки (ADR-005): disable / cooldown / только last_error.
 
-        model_id сейчас не влияет на обработку (cooldown ставим на проект);
-        параметр оставлен для симметрии API и будущих per-model cooldown.
+        429 (RATE_LIMIT) — in-memory cooldown строго per (project, model):
+        другие модели того же проекта продолжают обслуживаться (A10); БД
+        cooldown_until (project-level, схема — владелец G) не трогается.
         """
         code = error.raw_code
         message = str(error)[:_MAX_ERROR_MESSAGE]
@@ -182,7 +234,7 @@ class GeminiProjectPool:
                 await self._store.mark_error(project_id, error_code=code, error_message=message)
             case ErrorCategory.RATE_LIMIT:
                 delay = error.retry_after if error.retry_after is not None else self._cooldown_429
-                await self._store.set_cooldown(project_id, now + timedelta(seconds=delay))
+                self._model_cooldowns[(project_id, model_id)] = now + timedelta(seconds=delay)
                 await self._store.mark_error(project_id, error_code=code, error_message=message)
             case ErrorCategory.SERVER | ErrorCategory.NETWORK | ErrorCategory.TIMEOUT:
                 await self._store.set_cooldown(
@@ -203,7 +255,9 @@ class GeminiProjectPool:
         """Стрим с ротацией проектов: максимум один полный проход пула.
 
         Перезапуск только если не эмитнуто ни одного события (partial stream не
-        перезапускаем). 400/safety — сразу наверх. CancelledError — проброс без
+        перезапускаем). Server/network/timeout — перед ротацией ОДИН повтор того
+        же проекта с задержкой retry_delay (A10 bounded retry, только до первого
+        события). 400/safety — сразу наверх. CancelledError — проброс без
         report_error. Пул исчерпан — PoolExhaustedError.
         """
         tried: set[UUID] = set()
@@ -216,25 +270,40 @@ class GeminiProjectPool:
                 request, metadata={**request.metadata, "api_key": cred.api_key}
             )
             events_started = False
-            try:
-                async for event in self._stream_attempt(provider, req2, request, cred, now_fn):
-                    events_started = True
-                    yield event
-                return  # стрим дошёл до конца — успех
-            except asyncio.CancelledError:
-                raise
-            except ProviderError as e:
-                await self.report_error(cred.project_id, request.model, e, now=now_fn())
-                if e.category in (ErrorCategory.INVALID_REQUEST, ErrorCategory.SAFETY):
+            retried = False
+            while True:
+                try:
+                    async for event in self._stream_attempt(provider, req2, request, cred, now_fn):
+                        events_started = True
+                        yield event
+                    return  # стрим дошёл до конца — успех
+                except asyncio.CancelledError:
                     raise
-                if events_started:
-                    raise  # partial stream не перезапускаем (N03)
-                logger.warning(
-                    "gemini pool: проект %s дал %s — ротация на следующий",
-                    cred.name,
-                    e.category,
-                )
-                tried.add(cred.project_id)
+                except ProviderError as e:
+                    if not retried and not events_started and e.category in _RETRY_SAME_PROJECT:
+                        # A10: один повтор того же проекта до ротации; partial
+                        # stream (events_started) ретраить нельзя.
+                        retried = True
+                        logger.info(
+                            "gemini pool: проект %s дал %s — повтор той же попытки через %.1fs",
+                            cred.name,
+                            e.category,
+                            self._retry_delay,
+                        )
+                        await asyncio.sleep(self._retry_delay)
+                        continue
+                    await self.report_error(cred.project_id, request.model, e, now=now_fn())
+                    if e.category in (ErrorCategory.INVALID_REQUEST, ErrorCategory.SAFETY):
+                        raise
+                    if events_started:
+                        raise  # partial stream не перезапускаем (N03)
+                    logger.warning(
+                        "gemini pool: проект %s дал %s — ротация на следующий",
+                        cred.name,
+                        e.category,
+                    )
+                    tried.add(cred.project_id)
+                    break
 
     @staticmethod
     def _record_attempt(request: LLMRequest, cred: PooledCredential) -> None:
@@ -269,6 +338,8 @@ class GeminiProjectPool:
                 yield event
         finally:
             # Нормальный конец ИЛИ потребитель ушёл после Done (break) — успех.
+            # Ровно один report_success/reconcile на попытку (идемпотентность
+            # reconcile — контрактом вызывающей стороны, см. QuotaTracker).
             if terminal_seen:
                 with contextlib.suppress(Exception):
                     await self.report_success(
@@ -276,4 +347,5 @@ class GeminiProjectPool:
                         request.model,
                         input_tokens=last_usage.input_tokens if last_usage else None,
                         now=now_fn(),
+                        reservation=cred.quota_reservation,
                     )

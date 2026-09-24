@@ -74,10 +74,17 @@ function ChatRow({ chat, disabled, onOpen, onRename, onArchive, onDelete }: Chat
   );
 }
 
+const PAGE_SIZE = 20;
+
 export function ChatsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const chatsQ = useChats();
+  const [activeLimit, setActiveLimit] = useState(PAGE_SIZE);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveLimit, setArchiveLimit] = useState(PAGE_SIZE);
+
+  const chatsQ = useChats({ limit: activeLimit });
+  const archivedQ = useChats({ limit: archiveLimit, include_archived: true, enabled: archiveOpen });
   const invalidate = () => void qc.invalidateQueries({ queryKey: qk.chats });
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -87,7 +94,7 @@ export function ChatsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Chat | null>(null);
 
   const openChat = useMutation({
-    mutationFn: (id: number) => api<{ ok: boolean }>(`/api/chats/${id}/open`, { method: "POST" }),
+    mutationFn: (id: string) => api<{ ok: boolean }>(`/api/chats/${id}/open`, { method: "POST" }),
     onSuccess: () => {
       invalidate();
       navigate("/");
@@ -106,7 +113,7 @@ export function ChatsPage() {
   });
 
   const renameChat = useMutation({
-    mutationFn: ({ id, title }: { id: number; title: string }) =>
+    mutationFn: ({ id, title }: { id: string; title: string }) =>
       api<{ chat: Chat }>(`/api/chats/${id}`, { method: "PATCH", body: { title } }),
     onSuccess: () => {
       invalidate();
@@ -115,13 +122,13 @@ export function ChatsPage() {
   });
 
   const archiveChat = useMutation({
-    mutationFn: ({ id, archived }: { id: number; archived: boolean }) =>
+    mutationFn: ({ id, archived }: { id: string; archived: boolean }) =>
       api<{ ok: boolean }>(`/api/chats/${id}/archive`, { method: "POST", body: { archived } }),
     onSuccess: invalidate,
   });
 
   const deleteChat = useMutation({
-    mutationFn: (id: number) => api<{ ok: boolean }>(`/api/chats/${id}`, { method: "DELETE" }),
+    mutationFn: (id: string) => api<{ ok: boolean }>(`/api/chats/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       invalidate();
       setDeleteTarget(null);
@@ -144,9 +151,14 @@ export function ChatsPage() {
     );
   }
 
-  const chats = chatsQ.data?.chats ?? [];
-  const active = chats.filter((c) => c.archived_at === null);
-  const archived = chats.filter((c) => c.archived_at !== null);
+  const active = chatsQ.data?.chats ?? [];
+  const activeTotal = chatsQ.data?.total ?? active.length;
+  const hasMoreActive = active.length < activeTotal;
+
+  const archivedAll = archivedQ.data?.chats ?? [];
+  const archived = archivedAll.filter((c) => c.archived_at !== null);
+  const hasMoreArchived = archiveOpen && archivedQ.data !== undefined && archivedAll.length < archivedQ.data.total;
+
   const busy =
     openChat.isPending ||
     createChat.isPending ||
@@ -169,7 +181,7 @@ export function ChatsPage() {
     <div className="page">
       <Button onClick={() => setCreateOpen(true)}>＋ Новый чат</Button>
 
-      {active.length === 0 && archived.length === 0 && (
+      {active.length === 0 && (
         <EmptyState icon="💬" text="Чатов пока нет. Создайте первый." />
       )}
 
@@ -178,16 +190,54 @@ export function ChatsPage() {
           {active.map((c) => (
             <ChatRow key={c.id} chat={c} {...rowProps} />
           ))}
+          {hasMoreActive && (
+            <div style={{ padding: 12 }}>
+              <Button
+                size="small"
+                variant="secondary"
+                loading={chatsQ.isFetching}
+                onClick={() => setActiveLimit((v) => v + PAGE_SIZE)}
+              >
+                Загрузить ещё ({active.length} из {activeTotal})
+              </Button>
+            </div>
+          )}
         </Section>
       )}
 
-      {archived.length > 0 && (
-        <Section title="Архив">
-          {archived.map((c) => (
-            <ChatRow key={c.id} chat={c} {...rowProps} />
-          ))}
-        </Section>
-      )}
+      <Section title="Архив">
+        {!archiveOpen ? (
+          <div style={{ padding: 12 }}>
+            <Button size="small" variant="secondary" onClick={() => setArchiveOpen(true)}>
+              Показать архивные чаты
+            </Button>
+          </div>
+        ) : archivedQ.isLoading ? (
+          <Spinner center />
+        ) : archivedQ.error ? (
+          <div className="error-text" style={{ padding: 12 }}>{errorMessage(archivedQ.error)}</div>
+        ) : archived.length === 0 ? (
+          <div className="hint-text" style={{ padding: 12 }}>Архив пуст.</div>
+        ) : (
+          <>
+            {archived.map((c) => (
+              <ChatRow key={c.id} chat={c} {...rowProps} />
+            ))}
+            {hasMoreArchived && (
+              <div style={{ padding: 12 }}>
+                <Button
+                  size="small"
+                  variant="secondary"
+                  loading={archivedQ.isFetching}
+                onClick={() => setArchiveLimit((v) => v + PAGE_SIZE)}
+              >
+                Загрузить ещё
+              </Button>
+              </div>
+            )}
+          </>
+        )}
+      </Section>
 
       {(openChat.error || archiveChat.error) && (
         <div className="error-text">{errorMessage(openChat.error ?? archiveChat.error)}</div>

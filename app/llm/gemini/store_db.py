@@ -1,7 +1,9 @@
 """DB-адаптеры для GeminiProjectPool: ProjectStore/QuotaStore поверх репозиториев.
 
 Каждый метод открывает короткую сессию из session_factory — пул живёт дольше,
-чем request-scoped сессия бота.
+чем request-scoped сессия бота. check_and_reserve_atomic — единственное место
+с несколькими операциями в одной сессии: check+reserve обязаны быть одной
+транзакцией (A09), иначе два параллельных запроса пройдут при лимите.
 """
 
 from __future__ import annotations
@@ -10,8 +12,11 @@ import uuid
 from collections.abc import Callable
 from datetime import date, datetime
 
+from sqlalchemy import and_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.db.models import QuotaDailyUsage, QuotaMinuteUsage
 from app.db.repositories import GeminiProjectRepository, QuotaPolicyRepository, QuotaUsageRepository
 from app.llm.gemini.pool import GeminiProjectPool, ProjectInfo
 from app.llm.gemini.quota import QuotaLimits, QuotaTracker, UsageSnapshot
@@ -116,6 +121,108 @@ class DbQuotaStore:
                 project_id, model_id, minute_ts=minute_ts, day=day, tokens_in=tokens_in
             )
             await session.commit()
+
+    async def check_and_reserve_atomic(
+        self,
+        project_id: uuid.UUID,
+        model_id: str,
+        *,
+        minute_ts: datetime,
+        day: date,
+        limits: QuotaLimits,
+    ) -> bool:
+        """Check+reserve одной транзакцией (A09).
+
+        Каждое окно — INSERT ... ON CONFLICT DO UPDATE с WHERE по лимитам:
+        существующая строка инкрементируется, только если лимит не достигнут
+        (конкурентные транзакции сериализуются row-lock'ом ON CONFLICT);
+        отсутствующая строка вставляется (свежее окно всегда в пределах
+        положительного лимита). RETURNING пуст при непрошедшем WHERE → отказ.
+        Отказ любого окна → rollback обоих инкрементов.
+
+        Лимит None не ограничивает. Лимит <= 0 — запрет без записи (INSERT
+        свежего окна обходит WHERE, поэтому такие лимиты отсекаются заранее).
+        TPM сравнивается с уже учтёнными tokens_in: фактические токены запроса
+        неизвестны на момент reserve и довносятся reconcile post-factum —
+        допуск сверх TPM после факта НЕ блокируется (local accounting,
+        зафиксировано в .agents/reports/fix-v2/polyra-gemini/wave2.md).
+        """
+        if (
+            (limits.rpm is not None and limits.rpm <= 0)
+            or (limits.tpm is not None and limits.tpm <= 0)
+            or (limits.rpd is not None and limits.rpd <= 0)
+        ):
+            return False
+        async with self._session_factory() as session:
+            minute_ok = await self._reserve_minute_window(
+                session, project_id, model_id, minute_ts, limits
+            )
+            daily_ok = (
+                await self._reserve_daily_window(session, project_id, model_id, day, limits)
+                if minute_ok
+                else False
+            )
+            if minute_ok and daily_ok:
+                await session.commit()
+                return True
+            await session.rollback()
+            return False
+
+    @staticmethod
+    async def _reserve_minute_window(
+        session: AsyncSession,
+        project_id: uuid.UUID,
+        model_id: str,
+        minute_ts: datetime,
+        limits: QuotaLimits,
+    ) -> bool:
+        """+1 requests_count в минутном окне, если rpm/tpm не достигнуты."""
+        conditions = []
+        if limits.rpm is not None:
+            conditions.append(QuotaMinuteUsage.requests_count < limits.rpm)
+        if limits.tpm is not None:
+            conditions.append(QuotaMinuteUsage.tokens_in < limits.tpm)
+        insert_stmt = pg_insert(QuotaMinuteUsage).values(
+            project_id=project_id,
+            model_id=model_id,
+            minute_ts=minute_ts,
+            requests_count=1,
+            tokens_in=0,
+        )
+        upsert_stmt = insert_stmt.on_conflict_do_update(
+            constraint="uq_quota_minute_usage_project_id",
+            set_={"requests_count": QuotaMinuteUsage.requests_count + 1},
+            where=and_(*conditions) if conditions else None,
+        ).returning(QuotaMinuteUsage.id)
+        result = await session.execute(upsert_stmt)
+        return result.scalar_one_or_none() is not None
+
+    @staticmethod
+    async def _reserve_daily_window(
+        session: AsyncSession,
+        project_id: uuid.UUID,
+        model_id: str,
+        day: date,
+        limits: QuotaLimits,
+    ) -> bool:
+        """+1 requests_count в суточном окне, если rpd не достигнут."""
+        conditions = []
+        if limits.rpd is not None:
+            conditions.append(QuotaDailyUsage.requests_count < limits.rpd)
+        insert_stmt = pg_insert(QuotaDailyUsage).values(
+            project_id=project_id,
+            model_id=model_id,
+            day=day,
+            requests_count=1,
+            tokens_in=0,
+        )
+        upsert_stmt = insert_stmt.on_conflict_do_update(
+            constraint="uq_quota_daily_usage_project_id",
+            set_={"requests_count": QuotaDailyUsage.requests_count + 1},
+            where=and_(*conditions) if conditions else None,
+        ).returning(QuotaDailyUsage.id)
+        result = await session.execute(upsert_stmt)
+        return result.scalar_one_or_none() is not None
 
 
 def build_gemini_pool(

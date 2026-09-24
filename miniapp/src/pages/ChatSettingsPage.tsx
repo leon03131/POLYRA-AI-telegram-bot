@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, errorMessage } from "../api/client";
-import { qk, useChats, useModels, useSettings } from "../api/hooks";
+import { qk, useChat, useModels, useSettings } from "../api/hooks";
 import type { Chat, ChatPatch } from "../api/types";
 import {
   Button,
@@ -19,12 +19,12 @@ export function ChatSettingsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const chatsQ = useChats();
+  const chatQ = useChat(id);
   const modelsQ = useModels();
   const settingsQ = useSettings();
 
-  const chatId = Number(id);
-  const chat = (chatsQ.data?.chats ?? []).find((c) => c.id === chatId) ?? null;
+  const chatId = id ?? "";
+  const chat = chatQ.data?.chat ?? null;
 
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -33,7 +33,7 @@ export function ChatSettingsPage() {
   useEffect(() => {
     if (chat && !promptLoaded) {
       setTitle(chat.title ?? "");
-      setPrompt("");
+      setPrompt(chat.system_prompt_override ?? "");
       setPromptLoaded(true);
     }
   }, [chat, promptLoaded]);
@@ -65,10 +65,22 @@ export function ChatSettingsPage() {
 
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  if (chatsQ.isLoading || modelsQ.isLoading) {
+  if (chatQ.isLoading || modelsQ.isLoading || settingsQ.isLoading) {
     return (
       <div className="page">
         <Spinner center />
+      </div>
+    );
+  }
+
+  if (chatQ.error) {
+    return (
+      <div className="page">
+        <EmptyState icon="⚠️" text={errorMessage(chatQ.error)}>
+          <Button variant="secondary" onClick={() => navigate("/chats")}>
+            К списку чатов
+          </Button>
+        </EmptyState>
       </div>
     );
   }

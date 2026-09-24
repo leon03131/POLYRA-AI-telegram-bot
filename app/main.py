@@ -6,7 +6,7 @@ import logging
 import uvicorn
 
 from app.api.app import create_app
-from app.bot.dispatcher import create_bot, create_dispatcher, setup_bot_commands
+from app.bot.dispatcher import create_bot, create_dispatcher, setup_bot_commands, setup_menu_button
 from app.config import get_settings
 from app.context import ContextBuilder, ContextCompactor, TitleGenerator, TokenBudgetManager
 from app.db.repositories import GenerationRunRepository
@@ -122,6 +122,7 @@ async def main() -> None:
         # A34: pending updates НЕ выбрасываем (история Telegram переживает рестарт).
         await bot.delete_webhook(drop_pending_updates=False)
         await setup_bot_commands(bot)
+        await setup_menu_button(bot, settings)  # A02: глобальная кнопка Mini App
         logger.info(
             "bot started (long polling); mini app api on %s:%s",
             settings.api_host,

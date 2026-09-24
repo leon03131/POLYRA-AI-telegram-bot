@@ -28,6 +28,11 @@ router = Router(name="commands")
 _OPEN_CHAT_PREFIX = "chat:open:"
 
 
+def build_admin_url(app_base_url: str) -> str:
+    """URL админ-панели Mini App. Frontend — HashRouter → hash route /#/admin (A02)."""
+    return f"{app_base_url.rstrip('/')}/#/admin"
+
+
 def build_open_chat_callback(chat_id: uuid.UUID) -> str:
     """callback_data кнопки «открыть чат»."""
     return f"{_OPEN_CHAT_PREFIX}{chat_id}"
@@ -164,7 +169,7 @@ async def cmd_admin(message: Message, user: User, settings: Settings) -> None:
                 [
                     InlineKeyboardButton(
                         text="🛠 Админ-панель",
-                        web_app=WebAppInfo(url=f"{settings.app_base_url}/admin"),
+                        web_app=WebAppInfo(url=build_admin_url(settings.app_base_url)),
                     )
                 ]
             ]

@@ -1,10 +1,23 @@
-"""Unit-тесты хелперов callback_data кнопок выбора чата."""
+"""Unit-тесты хелперов callback_data кнопок выбора чата и URL Mini App."""
 
 from __future__ import annotations
 
 import uuid
 
-from app.bot.routers.commands import build_open_chat_callback, parse_open_chat_callback
+from app.bot.routers.commands import (
+    build_admin_url,
+    build_open_chat_callback,
+    parse_open_chat_callback,
+)
+
+
+def test_build_admin_url_uses_hash_route() -> None:
+    """A02: /admin → hash route (frontend на HashRouter, прямой путь даёт 404)."""
+    assert build_admin_url("https://app.example.com") == "https://app.example.com/#/admin"
+
+
+def test_build_admin_url_strips_trailing_slash() -> None:
+    assert build_admin_url("https://app.example.com/") == "https://app.example.com/#/admin"
 
 
 def test_build_callback_has_prefix_and_uuid() -> None:

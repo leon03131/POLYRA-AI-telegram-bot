@@ -4,8 +4,10 @@ import { useAuth } from "../api/auth";
 const SUBTABS = [
   { to: "/admin", label: "Дашборд", end: true },
   { to: "/admin/users", label: "Пользователи", end: false },
+  { to: "/admin/models", label: "Модели", end: false },
   { to: "/admin/gemini", label: "Gemini", end: false },
   { to: "/admin/providers", label: "Провайдеры", end: false },
+  { to: "/admin/memory", label: "Память", end: false },
   { to: "/admin/search", label: "Поиск", end: false },
   { to: "/admin/system", label: "Система", end: false },
   { to: "/admin/audit", label: "Аудит", end: false },

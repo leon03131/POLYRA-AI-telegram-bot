@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
-from aiogram.types import BotCommand
+from aiogram.exceptions import TelegramAPIError
+from aiogram.types import BotCommand, MenuButtonWebApp, WebAppInfo
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot.middleware.access import AccessMiddleware
 from app.bot.middleware.errors import on_error
 from app.bot.routers import chat, commands, photos, stop
 from app.config import Settings
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from app.services.generation import GenerationRegistry, GenerationService
@@ -65,3 +69,21 @@ def create_dispatcher(
 async def setup_bot_commands(bot: Bot) -> None:
     """Зарегистрировать команды в меню Telegram."""
     await bot.set_my_commands(BOT_COMMANDS)
+
+
+async def setup_menu_button(bot: Bot, settings: Settings) -> None:
+    """Глобальная menu button «⚙️ Настройки» → Mini App (A02).
+
+    Вызывается один раз при startup БЕЗ chat_id — действует для всех чатов
+    (per-chat кнопка в /start остаётся как best-effort для старых клиентов).
+    Ошибка Telegram API не прерывает запуск (warning в лог).
+    """
+    try:
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(
+                text="⚙️ Настройки",
+                web_app=WebAppInfo(url=settings.app_base_url),
+            )
+        )
+    except TelegramAPIError:
+        logger.warning("failed to set global menu button", exc_info=True)

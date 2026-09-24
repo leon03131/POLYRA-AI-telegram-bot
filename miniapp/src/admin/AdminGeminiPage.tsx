@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, errorMessage } from "../api/client";
-import { qk, useGeminiProjects, useGeminiQuotas } from "../api/hooks";
-import type { GeminiProject, GeminiQuota } from "../api/types";
+import { qk, useGeminiProjects, useGeminiQuotas, useGeminiUsage } from "../api/hooks";
+import type { GeminiProject, GeminiQuota, ProviderTestResult } from "../api/types";
 import {
   Button,
   Chip,
@@ -26,7 +26,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
 
   const save = useMutation({
     mutationFn: () =>
-      api<{ ok: boolean; id: number }>("/api/admin/gemini/projects", {
+      api<{ ok: boolean; id: string }>("/api/admin/gemini/projects", {
         method: "POST",
         body: { name: name.trim(), api_key: apiKey.trim() },
       }),
@@ -133,6 +133,14 @@ interface ProjectCardProps {
 function ProjectCard({ project: p, isFirst, isLast, onDelete }: ProjectCardProps) {
   const qc = useQueryClient();
   const invalidate = () => void qc.invalidateQueries({ queryKey: qk.geminiProjects });
+  const [testResult, setTestResult] = useState<ProviderTestResult | null>(null);
+
+  const test = useMutation({
+    mutationFn: () =>
+      api<ProviderTestResult>(`/api/admin/gemini/projects/${p.id}/test`, { method: "POST" }),
+    onSuccess: (data) => setTestResult(data),
+    onError: (e) => setTestResult({ ok: false, latency_ms: 0, error: errorMessage(e) }),
+  });
 
   const toggle = useMutation({
     mutationFn: () =>
@@ -151,7 +159,7 @@ function ProjectCard({ project: p, isFirst, isLast, onDelete }: ProjectCardProps
     onSuccess: invalidate,
   });
 
-  const busy = toggle.isPending || move.isPending;
+  const busy = toggle.isPending || move.isPending || test.isPending;
   const cooldownActive = p.cooldown_until !== null && new Date(p.cooldown_until).getTime() > Date.now();
 
   return (
@@ -194,10 +202,21 @@ function ProjectCard({ project: p, isFirst, isLast, onDelete }: ProjectCardProps
         <Button size="small" variant="secondary" disabled={busy || isLast} onClick={() => move.mutate(1)}>
           ↓ Вниз
         </Button>
+        <Button size="small" variant="secondary" loading={test.isPending} onClick={() => test.mutate()}>
+          🔍 Тест
+        </Button>
         <Button size="small" variant="danger" disabled={busy} onClick={onDelete}>
           Удалить
         </Button>
       </div>
+
+      {testResult && (
+        <div className={testResult.ok ? "hint-text" : "error-text"}>
+          {testResult.ok
+            ? `✅ OK · ${testResult.latency_ms} мс`
+            : `❌ ${testResult.error ?? "ошибка"}${testResult.latency_ms ? ` · ${testResult.latency_ms} мс` : ""}`}
+        </div>
+      )}
     </div>
   );
 }
@@ -252,17 +271,31 @@ export function AdminGeminiPage() {
   const qc = useQueryClient();
   const projectsQ = useGeminiProjects();
   const quotasQ = useGeminiQuotas();
+  const [usageOpen, setUsageOpen] = useState(false);
+  const usageQ = useGeminiUsage(usageOpen);
 
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<GeminiProject | null>(null);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetResult, setResetResult] = useState<string | null>(null);
 
   const deleteProject = useMutation({
-    mutationFn: (id: number) =>
+    mutationFn: (id: string) =>
       api<{ ok: boolean }>(`/api/admin/gemini/projects/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.geminiProjects });
       setDeleteTarget(null);
+    },
+  });
+
+  const resetCounters = useMutation({
+    mutationFn: () =>
+      api<{ ok: boolean; deleted: number }>("/api/admin/gemini/reset-counters", { method: "POST" }),
+    onSuccess: (data) => {
+      setResetOpen(false);
+      setResetResult(`Счётчики сброшены: удалено записей ${data.deleted}.`);
+      void qc.invalidateQueries({ queryKey: qk.geminiUsage });
     },
   });
 
@@ -278,7 +311,13 @@ export function AdminGeminiPage() {
         <Button size="small" variant="secondary" onClick={() => setBulkOpen(true)}>
           📥 Массовый импорт
         </Button>
+        <Button size="small" variant="danger" onClick={() => setResetOpen(true)}>
+          ♻ Reset counters
+        </Button>
       </div>
+
+      {resetResult && <div className="hint-text">{resetResult}</div>}
+      {resetCounters.error && <div className="error-text">{errorMessage(resetCounters.error)}</div>}
 
       {projectsQ.isLoading && <Spinner center />}
       {projectsQ.error && <EmptyState icon="⚠️" text={errorMessage(projectsQ.error)} />}
@@ -326,8 +365,98 @@ export function AdminGeminiPage() {
         )}
       </Section>
 
+      <Section title="Использование квот">
+        {!usageOpen ? (
+          <div style={{ padding: 12 }}>
+            <Button size="small" variant="secondary" onClick={() => setUsageOpen(true)}>
+              Показать usage
+            </Button>
+          </div>
+        ) : usageQ.isLoading ? (
+          <Spinner center />
+        ) : usageQ.error ? (
+          <div className="error-text" style={{ padding: 12 }}>{errorMessage(usageQ.error)}</div>
+        ) : (
+          <>
+            {(usageQ.data?.minute.length ?? 0) > 0 && (
+              <>
+                <div className="hint-text" style={{ padding: "10px 16px 4px" }}>За минуту</div>
+                <div className="table-wrap" style={{ borderRadius: 0 }}>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Проект</th>
+                        <th>Модель</th>
+                        <th>Минута</th>
+                        <th>Запросы</th>
+                        <th>Токены in</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {usageQ.data?.minute.map((r, i) => (
+                        <tr key={`m-${i}`}>
+                          <td>{r.project_name}</td>
+                          <td className="mono">{r.model_id}</td>
+                          <td>{formatDateTime(r.minute_ts)}</td>
+                          <td>{r.requests_count}</td>
+                          <td>{r.tokens_in}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+            {(usageQ.data?.daily.length ?? 0) > 0 && (
+              <>
+                <div className="hint-text" style={{ padding: "10px 16px 4px" }}>За день</div>
+                <div className="table-wrap" style={{ borderRadius: 0 }}>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Проект</th>
+                        <th>Модель</th>
+                        <th>День</th>
+                        <th>Запросы</th>
+                        <th>Токены in</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {usageQ.data?.daily.map((r, i) => (
+                        <tr key={`d-${i}`}>
+                          <td>{r.project_name}</td>
+                          <td className="mono">{r.model_id}</td>
+                          <td>{r.day}</td>
+                          <td>{r.requests_count}</td>
+                          <td>{r.tokens_in}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+            {(usageQ.data?.minute.length ?? 0) === 0 && (usageQ.data?.daily.length ?? 0) === 0 && (
+              <div className="hint-text" style={{ padding: 12 }}>Данных об использовании нет.</div>
+            )}
+          </>
+        )}
+      </Section>
+
       {addOpen && <AddProjectModal onClose={() => setAddOpen(false)} />}
       {bulkOpen && <BulkImportModal onClose={() => setBulkOpen(false)} />}
+
+      <ConfirmDialog
+        open={resetOpen}
+        title="Сбросить счётчики квот?"
+        message="Будут очищены поминутные и дневные счётчики использования всех Gemini-проектов. Текущие cooldown/блокировки по квотам снимутся."
+        confirmText="Сбросить"
+        destructive
+        loading={resetCounters.isPending}
+        error={resetCounters.error ? errorMessage(resetCounters.error) : null}
+        onCancel={() => setResetOpen(false)}
+        onConfirm={() => resetCounters.mutate()}
+      />
 
       <ConfirmDialog
         open={deleteTarget !== null}

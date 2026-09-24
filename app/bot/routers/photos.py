@@ -59,8 +59,17 @@ async def on_photo_message(
     parts: list[dict[str, Any]] = [
         {
             "type": "image",
+            # A18: устойчивый file_id — bytes в БД не храним (data_base64
+            # отбрасывается репозиторием), rehydration по требованию.
+            "telegram_file_id": photo.file_id,
             "mime_type": "image/jpeg",
             "data_base64": base64.b64encode(data).decode("ascii"),
+            "metadata_json": {
+                "file_unique_id": photo.file_unique_id,
+                "width": photo.width,
+                "height": photo.height,
+                "file_size": photo.file_size,
+            },
         }
     ]
     if message.caption:

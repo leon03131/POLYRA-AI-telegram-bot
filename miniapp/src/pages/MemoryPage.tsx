@@ -22,9 +22,12 @@ const IMPORTANCE_OPTIONS = Array.from({ length: 10 }, (_, i) => ({
   label: `${i + 1}`,
 }));
 
+const PAGE_SIZE = 50;
+
 export function MemoryPage() {
   const qc = useQueryClient();
-  const memoriesQ = useMemories();
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  const memoriesQ = useMemories({ limit });
   const invalidate = () => void qc.invalidateQueries({ queryKey: qk.memories });
 
   const [editTarget, setEditTarget] = useState<MemoryItem | null>(null);
@@ -34,7 +37,7 @@ export function MemoryPage() {
   const [deleteTarget, setDeleteTarget] = useState<MemoryItem | null>(null);
 
   const updateMemory = useMutation({
-    mutationFn: ({ id, body }: { id: number; body: MemoryPatch }) =>
+    mutationFn: ({ id, body }: { id: string; body: MemoryPatch }) =>
       api<{ memory: MemoryItem }>(`/api/memory/${id}`, { method: "PATCH", body }),
     onSuccess: () => {
       invalidate();
@@ -43,7 +46,7 @@ export function MemoryPage() {
   });
 
   const deleteMemory = useMutation({
-    mutationFn: (id: number) => api<{ ok: boolean }>(`/api/memory/${id}`, { method: "DELETE" }),
+    mutationFn: (id: string) => api<{ ok: boolean }>(`/api/memory/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       invalidate();
       setDeleteTarget(null);
@@ -67,6 +70,8 @@ export function MemoryPage() {
   }
 
   const memories = memoriesQ.data?.memories ?? [];
+  const total = memoriesQ.data?.total ?? memories.length;
+  const hasMore = memories.length < total;
 
   const openEdit = (m: MemoryItem) => {
     setEditTarget(m);
@@ -87,7 +92,7 @@ export function MemoryPage() {
       )}
 
       {memories.length > 0 && (
-        <Section title={`Записей: ${memories.length}`}>
+        <Section title={`Записей: ${total}`}>
           {memories.map((m) => (
             <div key={m.id} className="list-row">
               <div className="list-row-main">
@@ -123,6 +128,18 @@ export function MemoryPage() {
               </div>
             </div>
           ))}
+          {hasMore && (
+            <div style={{ padding: 12 }}>
+              <Button
+                size="small"
+                variant="secondary"
+                loading={memoriesQ.isFetching}
+                onClick={() => setLimit((v) => v + PAGE_SIZE)}
+              >
+                Загрузить ещё ({memories.length} из {total})
+              </Button>
+            </div>
+          )}
         </Section>
       )}
 

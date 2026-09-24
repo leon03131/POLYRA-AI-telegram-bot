@@ -1164,6 +1164,10 @@ class GenerationService:
                     prepared.run_id,
                     status="cancelled",
                     first_token_at=outcome.first_token_at,
+                    # B2 (QA): cancelled run тоже сохраняет известный usage (ledger §2).
+                    input_tokens=usage.input_tokens if usage else None,
+                    output_tokens=usage.output_tokens if usage else None,
+                    reasoning_tokens=usage.reasoning_tokens if usage else None,
                     tool_calls_count=outcome.tool_calls_count,
                 )
                 await session.commit()

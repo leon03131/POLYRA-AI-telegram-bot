@@ -13,7 +13,7 @@ export function HomePage() {
   const settingsQ = useSettings();
 
   const patchChat = useMutation({
-    mutationFn: ({ id, body }: { id: number; body: ChatPatch }) =>
+    mutationFn: ({ id, body }: { id: string; body: ChatPatch }) =>
       api<{ chat: Chat }>(`/api/chats/${id}`, { method: "PATCH", body }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: qk.chats }),
   });

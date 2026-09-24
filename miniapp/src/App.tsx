@@ -12,8 +12,10 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { AdminLayout } from "./admin/AdminLayout";
 import { AdminDashboardPage } from "./admin/AdminDashboardPage";
 import { AdminUsersPage } from "./admin/AdminUsersPage";
+import { AdminModelsPage } from "./admin/AdminModelsPage";
 import { AdminGeminiPage } from "./admin/AdminGeminiPage";
 import { AdminProvidersPage } from "./admin/AdminProvidersPage";
+import { AdminMemoryPage } from "./admin/AdminMemoryPage";
 import { AdminSearchPage } from "./admin/AdminSearchPage";
 import { AdminSystemPage } from "./admin/AdminSystemPage";
 import { AdminAuditPage } from "./admin/AdminAuditPage";
@@ -32,7 +34,7 @@ const queryClient = new QueryClient({
 function BackButtonManager() {
   const location = useLocation();
   const navigate = useNavigate();
-  const isDetail = /^\/chats\/\d+/.test(location.pathname);
+  const isDetail = /^\/chats\/[^/]+/.test(location.pathname);
   const canGoBack = location.key !== "default";
 
   const goBack = useCallback(() => {
@@ -128,8 +130,10 @@ function AppShell() {
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminDashboardPage />} />
             <Route path="users" element={<AdminUsersPage />} />
+            <Route path="models" element={<AdminModelsPage />} />
             <Route path="gemini" element={<AdminGeminiPage />} />
             <Route path="providers" element={<AdminProvidersPage />} />
+            <Route path="memory" element={<AdminMemoryPage />} />
             <Route path="search" element={<AdminSearchPage />} />
             <Route path="system" element={<AdminSystemPage />} />
             <Route path="audit" element={<AdminAuditPage />} />

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from types import SimpleNamespace
 
-from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramRetryAfter
 from aiogram.methods import SendMessageDraft, SendRichMessageDraft
 from aiogram.types import InputRichMessage
 
@@ -25,6 +25,11 @@ def _bad_request(message: str = "Bad Request") -> TelegramBadRequest:
 def _api_error(message: str = "Gateway Timeout") -> TelegramAPIError:
     method = SendMessageDraft(chat_id=CHAT_ID, draft_id=1, text="x")
     return TelegramAPIError(method=method, message=message)
+
+
+def _retry_after(retry_after: int = 5) -> TelegramRetryAfter:
+    method = SendMessageDraft(chat_id=CHAT_ID, draft_id=1, text="x")
+    return TelegramRetryAfter(method=method, message="Too Many Requests", retry_after=retry_after)
 
 
 class FakeBot:
@@ -296,3 +301,188 @@ async def test_finalize_tier3_long_text_edits_then_sends_rest() -> None:
     assert methods.count("edit_message_text") == 1
     assert methods.count("send_message") == 2  # tier3 первичное + «хвост» >4096
     assert "send_rich_message" not in methods
+
+
+async def test_plain_tiers_pass_parse_mode_none() -> None:
+    """A20: send_message_draft / send_message / edit_message_text — с parse_mode=None.
+
+    У бота default parse_mode=HTML: plain-текст с '<div>' иначе упал бы
+    с TelegramBadRequest.
+    """
+    bot = FakeBot()
+    t, clock = make_clock()
+    streamer = make_streamer(bot, clock)
+    bot.fail("send_rich_message_draft", _bad_request())
+    bot.fail("send_message_draft", _api_error(), times=10**6)  # постоянный tier3
+
+    await streamer.append("<div>hello</div>")
+    await streamer.flush(force=True)  # tier2 fail → tier3: send_message
+    draft_kwargs = next(kw for name, kw in bot.calls if name == "send_message_draft")
+    send_kwargs = next(kw for name, kw in bot.calls if name == "send_message")
+    assert draft_kwargs["parse_mode"] is None
+    assert send_kwargs["parse_mode"] is None
+
+    t[0] += 2.0
+    await streamer.append("!")
+    await streamer.flush(force=True)  # tier3: edit
+    edit_kwargs = next(kw for name, kw in bot.calls if name == "edit_message_text")
+    assert edit_kwargs["parse_mode"] is None
+
+
+async def test_finalize_plain_fallback_passes_parse_mode_none() -> None:
+    """A20: finalize fallback на send_message тоже идёт с parse_mode=None."""
+    bot = FakeBot()
+    _, clock = make_clock()
+    bot.fail("send_rich_message", _api_error("no rich"))
+    streamer = make_streamer(bot, clock)
+    await streamer.append("plain <b>text</b>")
+    await streamer.finalize()
+    send_kwargs = next(kw for name, kw in bot.calls if name == "send_message")
+    assert send_kwargs["parse_mode"] is None
+
+
+async def test_tier3_not_modified_edit_counts_as_success() -> None:
+    """A21: edit «message is not modified» — успех (идемпотентно), без fallback."""
+    bot = FakeBot()
+    t, clock = make_clock()
+    streamer = make_streamer(bot, clock)
+    bot.fail("send_rich_message_draft", _bad_request())
+    bot.fail("send_message_draft", _api_error(), times=10**6)
+
+    await streamer.append("hello")
+    await streamer.flush(force=True)  # tier3: первичное send_message
+    assert bot.methods().count("send_message") == 1
+
+    t[0] += 2.0
+    bot.fail("edit_message_text", _bad_request("Bad Request: message is not modified"))
+    await streamer.flush(force=True)  # not-modified → успех, _last_flush обновлён
+    assert bot.methods().count("send_message") == 1  # НЕТ новых сообщений
+    assert bot.methods().count("edit_message_text") == 1
+    assert streamer._next_attempt_at is None  # успех, а не cooldown
+
+    await streamer.append("!")  # interval не прошёл → авто-flush не сработает
+    assert bot.methods().count("edit_message_text") == 1
+
+
+async def test_tier3_other_bad_request_is_not_treated_as_success() -> None:
+    """A21: ДРУГОЙ BadRequest (не «not modified») — ошибка, планируется backoff."""
+    bot = FakeBot()
+    t, clock = make_clock()
+    streamer = make_streamer(bot, clock)
+    bot.fail("send_rich_message_draft", _bad_request())
+    bot.fail("send_message_draft", _api_error(), times=10**6)
+
+    await streamer.append("hello")
+    await streamer.flush(force=True)  # tier3: send_message
+    t[0] += 2.0
+    bot.fail("edit_message_text", _bad_request("Bad Request: message text is empty"))
+    await streamer.flush(force=True)
+    assert streamer._next_attempt_at is not None  # cooldown, НЕ успех
+
+
+async def test_finalize_tier3_not_modified_edit_is_success_without_duplicates() -> None:
+    """A21: финальный tier3 edit «not modified» — успех без новых сообщений."""
+    bot = FakeBot()
+    _, clock = make_clock()
+    streamer = make_streamer(bot, clock)
+    bot.fail("send_rich_message_draft", _bad_request())
+    bot.fail("send_message_draft", _api_error(), times=10**6)
+
+    await streamer.append("hello")
+    await streamer.flush(force=True)  # tier3: первичное send_message
+    bot.fail("edit_message_text", _bad_request("Bad Request: message is not modified"))
+    result = await streamer.finalize()
+
+    assert result is None  # сообщение уже содержит финальный текст
+    assert bot.methods().count("send_message") == 1  # только первичное tier3
+    assert "send_rich_message" not in bot.methods()
+
+
+async def test_retry_after_delays_next_flush_without_tier_change() -> None:
+    """A22: TelegramRetryAfter → cooldown на retry_after; tier НЕ меняется."""
+    bot = FakeBot()
+    t, clock = make_clock()
+    bot.fail("send_rich_message_draft", _retry_after(5))
+    streamer = make_streamer(bot, clock)
+
+    await streamer.append("hello")
+    await streamer.flush(force=True)  # 429 → cooldown до t+5
+    assert bot.methods() == ["send_rich_message_draft"]
+
+    t[0] += 1.0  # внутри retry_after
+    await streamer.flush()  # скоалесцирован, НЕ шлёт
+    assert bot.methods() == ["send_rich_message_draft"]
+
+    t[0] += 4.5  # cooldown прошёл
+    await streamer.flush()  # ретрай ТЕМ ЖЕ tier 1
+    assert bot.methods() == ["send_rich_message_draft", "send_rich_message_draft"]
+
+
+async def test_retry_after_on_plain_draft_does_not_downgrade_tier() -> None:
+    """A22: 429 на tier2 — временный rate limit, НЕ downgrade в tier3."""
+    bot = FakeBot()
+    t, clock = make_clock()
+    bot.fail("send_rich_message_draft", _bad_request())
+    bot.fail("send_message_draft", _retry_after(3))
+    streamer = make_streamer(bot, clock)
+
+    await streamer.append("hello")
+    await streamer.flush(force=True)  # rich BadRequest → tier2 → 429 → стоп
+    assert bot.methods() == ["send_rich_message_draft", "send_message_draft"]
+    assert "send_message" not in bot.methods()  # tier3 не создавался
+
+    t[0] += 4.0  # retry_after прошёл
+    await streamer.flush()  # ретрай tier2, а не tier3
+    assert bot.methods()[-1] == "send_message_draft"
+    assert "send_message" not in bot.methods()
+
+
+async def test_transient_error_backoff_then_auto_resume_via_append() -> None:
+    """A22: первый упавший flush не глушит поток — append резюмит после backoff."""
+    bot = FakeBot()
+    t, clock = make_clock()
+    bot.fail("send_rich_message_draft", _api_error())  # один сбой
+    streamer = make_streamer(bot, clock)
+
+    await streamer.append("a")
+    await streamer.flush(force=True)  # ошибка → backoff 0.5 с
+    assert len(bot.calls) == 1
+
+    await streamer.append("b")  # cooldown не прошёл → коалесцирование (нет flood)
+    assert len(bot.calls) == 1
+
+    t[0] += 0.6
+    await streamer.append("c")  # cooldown прошёл → авто-flush, поток резюмился
+    assert len(bot.calls) == 2
+
+    await streamer.append("d")  # успех сбросил backoff; interval не прошёл
+    assert len(bot.calls) == 2
+
+    t[0] += 2.0
+    await streamer.append("e")  # обычный авто-flush по throttle_interval
+    assert len(bot.calls) == 3
+
+
+async def test_transient_backoff_grows_and_is_bounded() -> None:
+    """A22: backoff экспоненциален от 0.5 с и ограничен 5 с."""
+    bot = FakeBot()
+    t, clock = make_clock()
+    bot.fail("send_rich_message_draft", _api_error(), times=10)
+    streamer = make_streamer(bot, clock)
+
+    for delay in (0.5, 1.0, 2.0, 4.0, 5.0, 5.0):
+        await streamer.flush(force=True)  # всегда падает
+        assert streamer._next_attempt_at == t[0] + delay
+
+
+async def test_force_flush_bypasses_retry_after_cooldown() -> None:
+    """A22: force=True шлёт всегда, даже внутри retry_after cooldown."""
+    bot = FakeBot()
+    _, clock = make_clock()
+    bot.fail("send_rich_message_draft", _retry_after(30))
+    streamer = make_streamer(bot, clock)
+
+    await streamer.append("hello")
+    await streamer.flush(force=True)  # 429 → cooldown 30 с
+    await streamer.flush(force=True)  # всё равно шлёт
+    assert bot.methods() == ["send_rich_message_draft", "send_rich_message_draft"]

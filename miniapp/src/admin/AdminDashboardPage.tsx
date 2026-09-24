@@ -24,6 +24,7 @@ export function AdminDashboardPage() {
 
   const s = statsQ.data;
   const statusEntries = Object.entries(s.generations_by_status ?? {});
+  const modelEntries = Object.entries(s.requests_by_model_today ?? {}).sort((a, b) => b[1] - a[1]);
 
   return (
     <div className="page">
@@ -57,7 +58,27 @@ export function AdminDashboardPage() {
           </div>
           <div className="stat-label">Gemini: healthy / enabled / всего</div>
         </div>
+        {s.errors_today !== undefined && (
+          <div className="stat-card">
+            <div className="stat-value">{formatNumber(s.errors_today)}</div>
+            <div className="stat-label">Ошибок сегодня</div>
+          </div>
+        )}
+        {s.rate_limit_429_today !== undefined && (
+          <div className="stat-card">
+            <div className="stat-value">{formatNumber(s.rate_limit_429_today)}</div>
+            <div className="stat-label">429 сегодня</div>
+          </div>
+        )}
       </div>
+
+      {modelEntries.length > 0 && (
+        <Section title="Запросы по моделям (сегодня)">
+          {modelEntries.map(([modelId, count]) => (
+            <ListRow key={modelId} title={<span className="mono">{modelId}</span>} right={formatNumber(count)} />
+          ))}
+        </Section>
+      )}
 
       {statusEntries.length > 0 && (
         <Section title="Генерации по статусам">
