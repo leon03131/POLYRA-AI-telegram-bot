@@ -84,6 +84,7 @@ def _context(
     permissions: EffectivePermissions | None = None,
     session_factory: Any = None,
     search_manager: Any = None,
+    allowed_tool_names: frozenset[str] | None = None,
 ) -> ToolContext:
     return ToolContext(
         user_id=uuid.uuid4(),
@@ -92,6 +93,7 @@ def _context(
         session_factory=session_factory or FakeSessionFactory(),
         settings=Settings(),
         search_manager=search_manager,
+        allowed_tool_names=allowed_tool_names,
     )
 
 
@@ -434,6 +436,50 @@ class TestRunner:
         execution = await ToolRunner(registry).execute(_call("echo"), _context())
         assert execution.status == "error"
         assert execution.result.content == "контролируемый текст"
+
+    async def test_not_in_allowed_tool_names_denied(self) -> None:
+        """A12: инструмент вне effective tools → denied, handler НЕ вызывается."""
+        called = False
+
+        async def spy(args: dict[str, Any], context: ToolContext) -> str:
+            nonlocal called
+            called = True
+            return "done"
+
+        registry = ToolRegistry()
+        registry.register(_tool(handler=spy))
+        execution = await ToolRunner(registry).execute(
+            _call("echo"), _context(allowed_tool_names=frozenset({"other_tool"}))
+        )
+        assert execution.status == "denied"
+        assert execution.result.content == "Tool not allowed"
+        assert called is False
+
+    async def test_allowed_tool_names_allows_listed(self) -> None:
+        """A12: инструмент из effective tools исполняется как обычно."""
+        registry = ToolRegistry()
+        registry.register(_tool())
+        execution = await ToolRunner(registry).execute(
+            _call("echo"), _context(allowed_tool_names=frozenset({"echo"}))
+        )
+        assert execution.status == "ok"
+        assert execution.result.content == "echo: hi"
+
+    async def test_allowed_tool_names_none_keeps_permission_behavior(self) -> None:
+        """A12: allowed_tool_names=None → прежнее поведение по permissions."""
+        registry = ToolRegistry()
+        registry.register(_tool())
+        execution = await ToolRunner(registry).execute(_call("echo"), _context())
+        assert execution.status == "ok"
+
+    async def test_unknown_tool_not_in_allowed_is_denied_not_error(self) -> None:
+        """A12: enforcement раньше registry lookup — даже unknown tool → denied."""
+        execution = await ToolRunner(ToolRegistry()).execute(
+            ToolCall(id="c1", name="ghost", arguments_json="{}"),
+            _context(allowed_tool_names=frozenset({"web_search"})),
+        )
+        assert execution.status == "denied"
+        assert execution.result.content == "Tool not allowed"
 
 
 # --- запись tool_calls ------------------------------------------------------------

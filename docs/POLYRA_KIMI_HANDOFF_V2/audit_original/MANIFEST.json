@@ -1,0 +1,156 @@
+{
+  "audit_date": "2026-09-24",
+  "snapshot": "POLYRA-AI-telegram-bot-master (2).zip",
+  "snapshot_sha256": "37f7f26dc7503319db3b7bc90136f273cde3003a4ebaae54e39157f892ef6294",
+  "requirements_sha256": "15d28d70c78c15473384edd36f73d6baa466db84f848f6fc01b404959380d2e3",
+  "original_files": 215,
+  "original_lines": 27405,
+  "original_bytes": 1123529,
+  "findings": 40,
+  "priorities": {
+    "P1": 20,
+    "P2": 19,
+    "P3": 1
+  },
+  "all_original_hashes_unchanged": true,
+  "original_files_modified": false,
+  "live_provider_calls_made": false,
+  "zip_equals_current_github_head_verified": false,
+  "files": [
+    {
+      "path": "AUDIT.md",
+      "bytes": 92630,
+      "sha256": "8044727c41e64dd2ee14d16ba9e376179c3654a753613a39fd421a5a06c4756e"
+    },
+    {
+      "path": "CODE_EVIDENCE.md",
+      "bytes": 124709,
+      "sha256": "c8de512762e4b5609ca7a5e13bb1c012e3764f718e450e7dbf94c9aaf0253482"
+    },
+    {
+      "path": "FILE_REVIEW.md",
+      "bytes": 50437,
+      "sha256": "c38391e1f1cb6a9c050e4121f3b259ffb05ccf7f954b98a8d4e29cb615030f4e"
+    },
+    {
+      "path": "KIMI_FIX_PROMPT.txt",
+      "bytes": 79352,
+      "sha256": "2231141685421d2a1a36f96297129eee0175442f886e571ee9c01523af911b87"
+    },
+    {
+      "path": "OFFICIAL_SOURCES.md",
+      "bytes": 2755,
+      "sha256": "e9a18583409209e7e9f23d68d4c2bf9f587ab3ff56252f66b8947fd093e4cee1"
+    },
+    {
+      "path": "ORIGINAL_REQUIREMENTS.txt",
+      "bytes": 58091,
+      "sha256": "15d28d70c78c15473384edd36f73d6baa466db84f848f6fc01b404959380d2e3"
+    },
+    {
+      "path": "README.md",
+      "bytes": 2903,
+      "sha256": "1b38ba1ccaf9a0b4789051916c4391a6b7dc7473ca569a2178320de8b18bffdd"
+    },
+    {
+      "path": "REQUIREMENTS_MATRIX.md",
+      "bytes": 11246,
+      "sha256": "dc4ec502d8175f84b84fe2332e458e2ca1bdff0c5e48959ab724ec0f96468a10"
+    },
+    {
+      "path": "TEST_RESULTS.md",
+      "bytes": 5209,
+      "sha256": "5bd12f2ed07dab65d0415466b6bbe8f4283dc0c9ec7845d600f8143eca24ba37"
+    },
+    {
+      "path": "evidence/additional_checks.json",
+      "bytes": 621,
+      "sha256": "e5a9e532c828e690a902d1a913635ca757cdee60fe3edf70209f59712790ab1e"
+    },
+    {
+      "path": "evidence/alembic_offline.log",
+      "bytes": 1142,
+      "sha256": "1ec471239d157ec936b1d18eb31313655096f2dad6c5f9480c8561d1974fc566"
+    },
+    {
+      "path": "evidence/alembic_upgrade.sql",
+      "bytes": 13322,
+      "sha256": "eb9a804d6d53fbc9f9ae88dc3c1938720d2f7fd851c7c8e177656345f7bad091"
+    },
+    {
+      "path": "evidence/install.log",
+      "bytes": 3550,
+      "sha256": "3324a2233923e64ebebf62e6613ce1c5439343565c7bf5f1420a41f56d865185"
+    },
+    {
+      "path": "evidence/inventory.json",
+      "bytes": 36209,
+      "sha256": "a34949a2af7dab04e2a9ffc890fcb7019c0f5bbf5026eff3119f8ecce4912373"
+    },
+    {
+      "path": "evidence/npm_alternate_cache.log",
+      "bytes": 286,
+      "sha256": "26ab043c64f1990752f41b351720f4a0832f829b7424bd02dabb32a8cace8061"
+    },
+    {
+      "path": "evidence/npm_install.log",
+      "bytes": 290,
+      "sha256": "a3b15c21410434b84cd647f11e8a1f372dd658e68187773246f0ec143e331cad"
+    },
+    {
+      "path": "evidence/pytest_available.log",
+      "bytes": 340,
+      "sha256": "78faa97ca0a1f2a25f525300c41da47b0c8a81ef97c6df848c04abb8cfef0e42"
+    },
+    {
+      "path": "evidence/pytest_collection.log",
+      "bytes": 24921,
+      "sha256": "d1df52c6ad269648daad81def31ae895a6830e936ad066efff4cbc44d4035e7a"
+    },
+    {
+      "path": "evidence/reproduced.json",
+      "bytes": 1593,
+      "sha256": "e4e7f824e9768c901e8c66c59f693416039a952e174c307986ed2f4d8eb64fc8"
+    },
+    {
+      "path": "evidence/secret_pattern_scan.json",
+      "bytes": 155,
+      "sha256": "bee85de422606100626a2942b0ee5e94880ec7f4346c1e9f55b98c8e220bc37f"
+    },
+    {
+      "path": "evidence/static_analysis.json",
+      "bytes": 344307,
+      "sha256": "a99f501bd8c2ae2a1e853bdab7d136aa87ab43bf25a572b38917cdab528d2d4b"
+    },
+    {
+      "path": "evidence/typescript_syntax.json",
+      "bytes": 3445,
+      "sha256": "45dfdeb3399ad700fcacc317bcdefa6f0569c1b15eb0de5bda9e6b8bfedabb7d"
+    },
+    {
+      "path": "findings.json",
+      "bytes": 77889,
+      "sha256": "56c38472bc0bc302f81521f5057704a50b5c364f0c92da90f87c37cdb6bb4d0a"
+    },
+    {
+      "path": "regressions/README.md",
+      "bytes": 2684,
+      "sha256": "691a3ad60c93606014dd46ceb3b327fa2ff0d564bd70f5c462a8eb236927e2d9"
+    },
+    {
+      "path": "regressions/additional_checks.py",
+      "bytes": 3304,
+      "sha256": "ece8b4a172fafce25af4cdfbf84006752b1bb6e7268998ef27eab76bbd0dda3f"
+    },
+    {
+      "path": "regressions/reproduce_findings.py",
+      "bytes": 8377,
+      "sha256": "e262ac14fbd11a7a50a84689a14af7a296c91172f61207a8660b30cded67b86a"
+    },
+    {
+      "path": "regressions/static_audit.py",
+      "bytes": 3378,
+      "sha256": "fa6d0151b71bdd5e37f4c2cfa3a7e94c5e227c4e126abb42ca8cd3065bc2180f"
+    }
+  ]
+}

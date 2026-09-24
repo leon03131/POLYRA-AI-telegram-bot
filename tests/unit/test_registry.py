@@ -14,10 +14,31 @@ def test_registry_contains_all_spec_models() -> None:
         "qwen3.8-flash",
         "qwen3.8-max",
         "deepseek-v4.1-flash",
+        "deepseek-v4-pro",
         "glm-5.3",
         "kimi-k3",
     }
-    assert {m.model_id for m in registry.list_all()} == expected
+    models = registry.list_all()
+    assert {m.model_id for m in models} == expected
+    # 9 пользовательских + 1 internal; Pro — дополнение, Flash не заменён
+    assert len(models) >= 10
+    assert "deepseek-v4.1-flash" in {m.model_id for m in models}
+
+
+def test_deepseek_v4_pro_definition() -> None:
+    registry = default_registry()
+    model = registry.get("deepseek-v4-pro")
+    assert model.provider == "alibaba"
+    assert model.display_name == "DeepSeek V4 Pro"
+    assert model.supports_images is False  # text-only, НЕ копировать image от flash
+    assert model.input_modalities == frozenset({"text"})
+    assert model.max_context == 1_000_000
+    assert model.max_output == 393_216
+    assert model.function_calling is True
+    assert model.structured_output is True
+    assert model.thinking_modes == ("off", "high", "max")  # НИКАКИХ low/medium
+    assert model.default_thinking is None  # provider default = thinking ON
+    assert model.internal_only is False
 
 
 def test_internal_model_hidden_from_user_list() -> None:
@@ -25,6 +46,7 @@ def test_internal_model_hidden_from_user_list() -> None:
     user_ids = {m.model_id for m in registry.list_user_models()}
     assert "gemini-3.5-flash-lite" not in user_ids
     assert "gemini-3.5-flash-lite" in {m.model_id for m in registry.list_internal_models()}
+    assert "deepseek-v4-pro" in user_ids  # Pro видна пользователям
 
 
 def test_get_unknown_model_raises() -> None:

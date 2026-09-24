@@ -60,6 +60,13 @@ _THINKING_TABLE: dict[str, dict[str, dict[str, Any]]] = {
         "high": {"reasoning_effort": "high"},
         "max": {"reasoning_effort": "max"},
     },
+    "deepseek-v4-pro": {
+        # native значения только high/max (low/medium — alias на high, не шлём);
+        # thinking_budget/preserve_thinking/clear_thinking к нему НЕ применимы.
+        "off": {"enable_thinking": False},
+        "high": {"reasoning_effort": "high"},
+        "max": {"reasoning_effort": "max"},
+    },
     _GLM_MODEL: {  # thinking-only: "off" registry не выдаёт
         "low": {"reasoning_effort": "low"},
         "high": {"reasoning_effort": "high"},
@@ -261,32 +268,61 @@ def _events_from_choice(
     return events
 
 
+def _process_sse_line(
+    line: str, pending_tool_calls: dict[int, dict[str, Any]]
+) -> tuple[list[LLMEvent], Done | None, bool]:
+    """Одна SSE-строка → (события, отложенный Done, флаг [DONE]-sentinel)."""
+    line = line.strip()
+    if not line.startswith("data:"):
+        return [], None, False
+    data = line[len("data:") :].strip()
+    if data == "[DONE]":
+        return [], None, True
+    try:
+        chunk = json.loads(data)
+    except json.JSONDecodeError:
+        logger.debug("alibaba: skip non-JSON data line: %r", _truncate(data, 200))
+        return [], None, False
+    if not isinstance(chunk, dict):
+        return [], None, False
+    if chunk.get("error"):
+        raise classify_stream_error(chunk["error"])
+    events: list[LLMEvent] = []
+    done: Done | None = None
+    usage = _extract_usage(chunk)
+    if usage is not None:
+        events.append(usage)
+    for choice in chunk.get("choices") or []:
+        for event in _events_from_choice(choice, pending_tool_calls):
+            if isinstance(event, Done):
+                done = event  # Done эмитим последним, после usage-trailer
+            else:
+                events.append(event)
+    return events, done, False
+
+
 async def parse_chat_completions_sse(lines: AsyncIterator[str]) -> AsyncIterator[LLMEvent]:
     """SSE-строки -> LLMEvent. tool_calls накапливаются по index и эмитятся
-    при finish_reason="tool_calls" (id/name — из первого чанка вызова)."""
+    при finish_reason="tool_calls" (id/name — из первого чанка вызова).
+
+    Контракт завершения (FIX_V2 §1): ровно один терминальный Done, и Usage
+    (если провайдер его даёт) — строго ДО Done. Чанк с finish_reason
+    буферизуется: usage-trailer (choices: []) приходит ПОСЛЕ него. EOF без
+    finish_reason (и без [DONE]) — unexpected EOF (NetworkError), не успех;
+    недособранные tool_calls при EOF — та же EOF-ошибка."""
     pending_tool_calls: dict[int, dict[str, Any]] = {}
+    pending_done: Done | None = None
     async for line in lines:
-        line = line.strip()
-        if not line.startswith("data:"):
-            continue
-        data = line[len("data:") :].strip()
-        if data == "[DONE]":
-            return
-        try:
-            chunk = json.loads(data)
-        except json.JSONDecodeError:
-            logger.debug("alibaba: skip non-JSON data line: %r", _truncate(data, 200))
-            continue
-        if not isinstance(chunk, dict):
-            continue
-        if chunk.get("error"):
-            raise classify_stream_error(chunk["error"])
-        usage = _extract_usage(chunk)
-        if usage is not None:
-            yield usage
-        for choice in chunk.get("choices") or []:
-            for event in _events_from_choice(choice, pending_tool_calls):
-                yield event
+        events, done, sentinel = _process_sse_line(line, pending_tool_calls)
+        for event in events:
+            yield event
+        if done is not None:
+            pending_done = done
+        if sentinel:
+            break
+    if pending_done is None:
+        raise NetworkError("unexpected EOF: stream ended without finish")
+    yield pending_done
 
 
 class AlibabaProvider:
@@ -316,7 +352,10 @@ class AlibabaProvider:
 
     async def stream_chat(self, request: LLMRequest) -> AsyncIterator[LLMEvent]:
         """Стрим событий. Retry (1 повтор, backoff 0.5s) — только для network/timeout/
-        429/5xx и только пока не эмитнуто ни одного события."""
+        429/5xx и только пока не эмитнуто ни одного события.
+
+        Unexpected EOF (поток кончился без finish/[DONE]) — NetworkError из
+        парсера; при отмене (cancellation) это НЕ ошибка — завершаем тихо."""
         payload = build_chat_completions_payload(request)
         attempt = 0
         while True:
@@ -329,15 +368,20 @@ class AlibabaProvider:
                         body = await response.aread()
                         raise classify_http_error(response.status_code, body)
                     lines = self._cancellable_lines(response, request)
-                    async for event in parse_chat_completions_sse(lines):
-                        events_started = True
-                        yield event
+                    try:
+                        async for event in parse_chat_completions_sse(lines):
+                            events_started = True
+                            yield event
+                    except NetworkError:
+                        if request.cancellation.is_set():
+                            return  # отмена обрывает стрим без Done — не EOF-ошибка
+                        raise
                 return
             except httpx.TimeoutException as exc:
                 error: ProviderError = TimeoutError_(f"alibaba timeout ({exc.__class__.__name__})")
             except httpx.TransportError as exc:
                 error = NetworkError(f"alibaba network error ({exc.__class__.__name__})")
-            except (RateLimitError, ServerError) as exc:
+            except (RateLimitError, ServerError, NetworkError) as exc:
                 error = exc
             if events_started or attempt + 1 >= _MAX_ATTEMPTS:
                 raise error

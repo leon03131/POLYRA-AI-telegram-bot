@@ -3,6 +3,7 @@
 from app.db.repositories.access import (
     AccessRepository,
     ModelPermissionRepository,
+    UserModelAccessRepository,
     UserSettingsRepository,
 )
 from app.db.repositories.audit_logs import AuditLogRepository
@@ -17,6 +18,7 @@ from app.db.repositories.gemini import (
 from app.db.repositories.generation_runs import GenerationRunRepository
 from app.db.repositories.memories import MemoryRepository
 from app.db.repositories.messages import MessageRepository
+from app.db.repositories.model_overrides import ModelOverrideRepository
 from app.db.repositories.search_configs import SearchConfigRepository
 from app.db.repositories.system_settings import SystemSettingRepository
 from app.db.repositories.tool_calls import ToolCallRepository
@@ -31,6 +33,7 @@ __all__ = [
     "GenerationRunRepository",
     "MemoryRepository",
     "MessageRepository",
+    "ModelOverrideRepository",
     "ModelPermissionRepository",
     "ProviderCredentialRepository",
     "QuotaPolicyRepository",
@@ -38,6 +41,7 @@ __all__ = [
     "SearchConfigRepository",
     "SystemSettingRepository",
     "ToolCallRepository",
+    "UserModelAccessRepository",
     "UserRepository",
     "UserSettingsRepository",
 ]

@@ -11,8 +11,13 @@
   MASTER_ENCRYPTION_KEY из .env); --gemini-project задаёт проект по имени.
 - Alibaba: --alibaba-key → provider_credentials (БД) → env ALIBABA_API_KEY.
 
-Без ключей провайдер помечается "skipped"; код выхода всегда 0 (это отчёт,
-а не тест). Результаты: таблица в stdout + JSON в .agents/reports/probe_*.json.
+Без ключей провайдер помечается "skipped". Коды выхода: 0 — ok (или fail при
+запуске без --strict: это отчёт, а не тест); 1 — при --strict есть хотя бы один
+check fail (skipped за fail НЕ считается); 130 — KeyboardInterrupt.
+Результаты: таблица в stdout + JSON в .agents/reports/probe_*.json.
+
+Списки моделей — НЕ hardcoded, а enumeration из ModelRegistry (default_registry):
+новые модели попадают в прогон автоматически; internal_only помечаются в notes.
 
 Назначение — подтвердить/опровергнуть capabilities из docs/vendor/GEMINI.md и
 docs/vendor/ALIBABA.md: acceptance thinking-уровней (accepted/rejected), images,
@@ -64,9 +69,6 @@ _PNG_1X1_BASE64 = (
     "PX0DAAAAAAAAAAAA+QAMd+8APdkyBqwAAAAASUVORK5CYII="
 )
 
-_GEMINI_MODELS = ("gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite")
-_ALIBABA_MODELS = ("qwen3.8-flash", "deepseek-v4.1-flash", "glm-5.3", "kimi-k3")
-
 _ECHO_TOOL = LLMTool(
     name="echo",
     description="Echo back the provided text",
@@ -78,6 +80,11 @@ _ECHO_TOOL = LLMTool(
 )
 
 CheckResult = dict[str, str]  # {"status": "ok" | "fail" | "skipped", "detail": str}
+
+
+def _registry_models(registry: ModelRegistry, provider: str) -> list[ModelDefinition]:
+    """Все модели провайдера из registry, включая internal (помечаются в notes)."""
+    return [m for m in registry.list_all() if m.provider == provider]
 
 
 def _ok(detail: str) -> CheckResult:
@@ -462,8 +469,8 @@ async def probe_gemini(
     provider = GeminiProvider(base_url=settings.gemini_base_url, http_client=client)
     registry = default_registry()
     try:
-        for model in _GEMINI_MODELS:
-            definition = registry.get(model)
+        for definition in _registry_models(registry, "gemini"):
+            model = definition.model_id
             result["models"][model] = await _probe_gemini_model(provider, definition, api_key)
     finally:
         await client.aclose()
@@ -500,8 +507,8 @@ async def probe_alibaba(
     )
     registry = default_registry()
     try:
-        for model in _ALIBABA_MODELS:
-            definition = registry.get(model)
+        for definition in _registry_models(registry, "alibaba"):
+            model = definition.model_id
             result["models"][model] = await _probe_alibaba_model(provider, client, definition)
     finally:
         await client.aclose()
@@ -518,10 +525,10 @@ def _alibaba_recommendations(report: dict[str, Any], registry: ModelRegistry) ->
         return []
     lines: list[str] = []
     models = section.get("models") or {}
-    for model in _ALIBABA_MODELS:
+    for definition in _registry_models(registry, "alibaba"):
+        model = definition.model_id
         model_report = models.get(model) or {}
         checks = model_report.get("checks") or {}
-        definition = registry.get(model)
         text_check = checks.get("text_stream") or {}
         if text_check.get("status") != "ok":
             # Базовый запрос не прошёл (auth/quota/...) — выводы по уровням недостоверны.
@@ -606,7 +613,7 @@ def _reconfigure_stdio() -> None:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """CLI: --provider, --alibaba-key, --gemini-project."""
+    """CLI: --provider, --alibaba-key, --gemini-project, --strict."""
     parser = argparse.ArgumentParser(
         description="Capability probe: реальные (дёшево) запросы к Gemini/Alibaba"
     )
@@ -625,6 +632,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--gemini-project",
         default=None,
         help="имя проекта из gemini_projects; иначе первый enabled по rotation_order",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit code 1, если хоть один check fail (skipped за fail не считается)",
     )
     return parser.parse_args(argv)
 
@@ -656,8 +668,22 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     return report
 
 
+def _count_failures(report: dict[str, Any]) -> int:
+    """Число fail по всем check обоих провайдеров (skipped НЕ считается fail)."""
+    failures = 0
+    for provider_id in ("gemini", "alibaba"):
+        section = report.get(provider_id)
+        if not isinstance(section, dict) or section.get("status") != "ok":
+            continue  # skipped/fail уровня провайдера (нет ключей) — не check fail
+        for model_report in (section.get("models") or {}).values():
+            for check in (model_report.get("checks") or {}).values():
+                if check.get("status") == "fail":
+                    failures += 1
+    return failures
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Точка входа CLI. Код выхода всегда 0 (probe — отчёт, а не тест)."""
+    """Точка входа CLI. 0 — ok; 1 — есть fail при --strict; skipped != fail."""
     _reconfigure_stdio()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)  # не шумим per-request логами
@@ -687,6 +713,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {line}")
     path = _write_report(report)
     print(f"\nJSON-отчёт: {path}")
+    failures = _count_failures(report)
+    if args.strict and failures:
+        print(f"STRICT: fail-проверок: {failures} — exit 1")
+        return 1
     return 0
 
 

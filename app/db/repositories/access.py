@@ -7,7 +7,9 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import AccessGrant, UserModelPermission, UserSettings
+from app.db.models import AccessGrant, UserModelAccess, UserModelPermission, UserSettings
+
+_USER_MODEL_ACCESS_MODES = frozenset({"all", "list"})
 
 
 class AccessRepository:
@@ -49,6 +51,31 @@ class AccessRepository:
         return list(result.scalars().all())
 
 
+class UserModelAccessRepository:
+    """Режим доступа к моделям (user_model_access): 'all' | 'list' (A03)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_mode(self, user_id: uuid.UUID) -> str:
+        """Режим пользователя; 'all' при отсутствии записи (default)."""
+        access = await self._session.get(UserModelAccess, user_id)
+        return access.mode if access is not None else "all"
+
+    async def set_mode(self, user_id: uuid.UUID, mode: str) -> UserModelAccess:
+        """Upsert режима; mode обязан быть 'all' или 'list'."""
+        if mode not in _USER_MODEL_ACCESS_MODES:
+            raise ValueError(f"invalid user_model_access mode: {mode!r}")
+        access = await self._session.get(UserModelAccess, user_id)
+        if access is None:
+            access = UserModelAccess(user_id=user_id, mode=mode)
+            self._session.add(access)
+        else:
+            access.mode = mode
+        await self._session.flush()
+        return access
+
+
 class ModelPermissionRepository:
     """Per-user разрешения на модели."""
 
@@ -66,10 +93,16 @@ class ModelPermissionRepository:
         return list(result.scalars().all())
 
     async def allowed_model_ids(self, user_id: uuid.UUID) -> set[str] | None:
-        """Множество разрешённых model_id; None, если записей нет (без ограничений)."""
-        rows = await self.get_for_user(user_id)
-        if not rows:
+        """Разрешённые model_id с учётом режима user_model_access (A03).
+
+        mode 'all' (или записи нет) → None (без ограничений);
+        mode 'list' → set разрешённых моделей; ПУСТОЙ set = запрет всех
+        (пустой set ≠ None!).
+        """
+        mode = await UserModelAccessRepository(self._session).get_mode(user_id)
+        if mode == "all":
             return None
+        rows = await self.get_for_user(user_id)
         return {row.model_id for row in rows if row.allowed}
 
     async def set_permission(
@@ -94,7 +127,7 @@ class ModelPermissionRepository:
         return permission
 
     async def clear_for_user(self, user_id: uuid.UUID) -> None:
-        """Удалить все записи разрешений пользователя (→ None = без ограничений)."""
+        """Удалить все записи разрешений пользователя (режим задаётся в user_model_access)."""
         stmt = delete(UserModelPermission).where(UserModelPermission.user_id == user_id)
         await self._session.execute(stmt)
         await self._session.flush()

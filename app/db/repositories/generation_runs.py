@@ -2,9 +2,10 @@
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import GenerationRun
@@ -74,6 +75,19 @@ class GenerationRunRepository:
         )
         result = await self._session.execute(stmt)
         return int(result.scalar_one())
+
+    async def abort_stale(self) -> int:
+        """A34: при старте процесса все queued/running runs предыдущего процесса → aborted.
+
+        Возвращает число затронутых запусков."""
+        stmt = (
+            update(GenerationRun)
+            .where(GenerationRun.status.in_(("queued", "running")))
+            .values(status="aborted", finished_at=datetime.now(UTC))
+        )
+        result = cast("CursorResult[Any]", await self._session.execute(stmt))
+        await self._session.flush()
+        return int(result.rowcount or 0)
 
     async def tokens_since(self, user_id: uuid.UUID, *, since: datetime) -> int:
         """Сумма input+output токенов пользователя с момента `since` (для token limit)."""

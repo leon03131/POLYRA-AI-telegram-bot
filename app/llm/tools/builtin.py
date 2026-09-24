@@ -127,8 +127,16 @@ async def _web_search_handler(args: dict[str, Any], context: ToolContext) -> str
 
 
 def _format_search_outcome(outcome: Any) -> str:
-    """SearchOutcome → текст для модели: список результатов + AI Overview + SOURCES."""
-    results = list(getattr(outcome, "results", None) or [])
+    """SearchOutcome → текст для модели: список результатов + AI Overview + SOURCES.
+
+    title+url всегда вместе (результаты без url пропускаются); SOURCES — url'ы
+    через " | " (парсится наверху в generation.extract_sources).
+    """
+    results = [
+        result
+        for result in (getattr(outcome, "results", None) or [])
+        if getattr(result, "url", None)
+    ]
     parts: list[str] = []
     if results:
         parts.append(
@@ -140,9 +148,8 @@ def _format_search_outcome(outcome: Any) -> str:
     overview = getattr(outcome, "ai_overview_text", None)
     if overview:
         parts.append(f"AI Overview (не доверяй без источников): {overview}")
-    urls = [result.url for result in results if result.url]
-    if urls:
-        parts.append("SOURCES: " + " | ".join(urls))
+    if results:
+        parts.append("SOURCES: " + " | ".join(result.url for result in results))
     return "\n\n".join(parts) if parts else "ничего не найдено"
 
 
@@ -160,6 +167,11 @@ def _is_ssrf_error(exc: BaseException) -> bool:
 
 
 async def _open_url_handler(args: dict[str, Any], context: ToolContext) -> str:
+    """open_url: direct fetch с SSRF pinned connect; reader (Jina) — только
+    экстрактор текста поверх уже проверенного URL, при его сбое — локальная
+    экстракция (fallback внутри fetch_url). SSRF-проверки не обходятся ни на
+    одном пути (Jina как внешний сервис ходит в сеть сам, но получает от нас
+    только URL, прошедший validate_url_public_ips)."""
     url = args["url"]
     try:
         from app.search.fetcher import fetch_url

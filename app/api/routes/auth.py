@@ -48,8 +48,9 @@ async def auth_telegram(body: AuthRequest, request: Request) -> dict[str, Any]:
             language_code=tg_user.get("language_code"),
         )
         is_owner = telegram_user_id == settings.owner_telegram_id
-        if is_owner and not user.is_owner:
-            user.is_owner = True
+        if user.is_owner != is_owner:
+            # Флаг — только UI-подсказка (права даёт numeric id, A04); синхронизируем.
+            user.is_owner = is_owner
             await session.flush()
 
         grant = await AccessRepository(session).get_grant(user.id)
@@ -68,7 +69,7 @@ async def auth_telegram(body: AuthRequest, request: Request) -> dict[str, Any]:
         )
         allowed_models = await ModelPermissionRepository(session).allowed_model_ids(user.id)
         permissions = evaluate_access(
-            is_owner=is_owner or user.is_owner,
+            is_owner=is_owner,
             user_status=user.status,
             grant=grant_view,
             allowed_models=allowed_models,
@@ -90,5 +91,5 @@ async def auth_telegram(body: AuthRequest, request: Request) -> dict[str, Any]:
             "username": tg_user.get("username"),
             "first_name": tg_user.get("first_name") or "",
         },
-        "is_owner": is_owner or user.is_owner,
+        "is_owner": is_owner,
     }

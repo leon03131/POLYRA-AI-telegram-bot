@@ -31,8 +31,12 @@ SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
 
 
 def is_owner_user(user: User, settings: Settings) -> bool:
-    """Effective owner: флаг в БД или совпадение с settings.owner_telegram_id."""
-    return user.is_owner or user.telegram_user_id == settings.owner_telegram_id
+    """Owner identity: ТОЛЬКО numeric telegram_user_id == settings.owner_telegram_id.
+
+    Флаг User.is_owner в БД — информационный (UI-подсказка) и прав НЕ даёт
+    (A04, контракт FIX V2 §3); миграция 0009 очищает чужие флаги.
+    """
+    return user.telegram_user_id == settings.owner_telegram_id
 
 
 async def get_current_user(

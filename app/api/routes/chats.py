@@ -3,7 +3,7 @@
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,7 @@ from app.services.chats import ChatService
 router = APIRouter()
 
 _WEB_MODES = frozenset({"off", "auto", "on"})
+_MAX_LIMIT = 200
 
 
 class ChatCreateRequest(BaseModel):
@@ -51,6 +52,7 @@ def _chat_out(chat: Chat, *, current_chat_id: uuid.UUID | None) -> dict[str, Any
         "thinking_setting": chat.thinking_setting,
         "web_mode": chat.web_mode,
         "memory_enabled": chat.memory_enabled,
+        "system_prompt_override": chat.system_prompt_override,
         "created_at": chat.created_at,
         "updated_at": chat.updated_at,
         "archived_at": chat.archived_at,
@@ -77,14 +79,37 @@ def _validate_model(
 
 
 @router.get("/chats")
-async def list_chats(current: CurrentUserDep, session: SessionDep) -> dict[str, Any]:
-    """Активные (не архивные) чаты пользователя, свежие первыми."""
+async def list_chats(
+    current: CurrentUserDep,
+    session: SessionDep,
+    limit: int = Query(default=50),
+    offset: int = Query(default=0, ge=0),
+    include_archived: bool = Query(default=False),
+) -> dict[str, Any]:
+    """Чаты пользователя (свежие первыми) с пагинацией; include_archived добавляет архив."""
     user, _ = current
-    chats = await ChatRepository(session).list_for_user(user.id)
+    limit = max(1, min(limit, _MAX_LIMIT))
+    repo = ChatRepository(session)
+    chats = await repo.list_for_user(
+        user.id, include_archived=include_archived, limit=limit, offset=offset
+    )
+    total = await repo.count_for_user(user.id, include_archived=include_archived)
     current_chat_id = await ChatService(session).get_current_chat_id(user.id)
     return {
         "chats": [_chat_out(chat, current_chat_id=current_chat_id) for chat in chats],
+        "total": total,
     }
+
+
+@router.get("/chats/{chat_id}")
+async def get_chat(
+    chat_id: uuid.UUID, current: CurrentUserDep, session: SessionDep
+) -> dict[str, Any]:
+    """Один чат по id (в т.ч. архивный); 404 для чужого/отсутствующего."""
+    user, _ = current
+    chat = await _get_own_chat(session, chat_id, user)
+    current_chat_id = await ChatService(session).get_current_chat_id(user.id)
+    return {"chat": _chat_out(chat, current_chat_id=current_chat_id)}
 
 
 @router.post("/chats", status_code=201)

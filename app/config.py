@@ -32,7 +32,9 @@ class Settings(BaseSettings):
         "Никогда не выдумывай ссылки и источники: если не вызывал web_search, "
         "не пиши раздел «Источники» и не придумывай URL."
     )
-    show_sources: bool = False  # добавлять блок «Источники» к ответам после web_search
+    # V2/A32: при реально использованном поиске источники показываются по умолчанию.
+    # Владелец может выключить: SHOW_SOURCES=0.
+    show_sources: bool = True
     recent_history_limit: int = 20
     # context / compaction (M6)
     context_keep_recent: int = 10
@@ -51,6 +53,8 @@ class Settings(BaseSettings):
     photo_max_bytes: int = 15 * 1024 * 1024
     # tool engine (M8)
     max_tool_iterations: int = 8  # лимит раундов tool-calling loop
+    max_tool_calls_per_round: int = 4  # лимит вызовов в одном раунде (A39)
+    max_generation_seconds: int = 240  # общий deadline генерации (A39)
     log_level: str = "INFO"
     session_token_ttl_seconds: int = 900
     # Mini App API (M9/M10)

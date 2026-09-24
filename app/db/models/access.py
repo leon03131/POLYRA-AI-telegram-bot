@@ -45,6 +45,24 @@ class AccessGrant(TimestampMixin, Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class UserModelAccess(TimestampMixin, Base):
+    """Режим доступа пользователя к моделям: 'all' (без ограничений) | 'list' (allowlist).
+
+    Отсутствие записи трактуется как 'all' (A03). При mode='list' разрешённые
+    модели берутся из user_model_permissions, и ПУСТОЙ список = запрет всех
+    моделей (пустой set отличим от None/unrestricted).
+    """
+
+    __tablename__ = "user_model_access"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    mode: Mapped[str] = mapped_column(String(8), default="all", server_default="all")
+
+
 class UserModelPermission(TimestampMixin, Base):
     """Per-user разрешение/запрет конкретной модели."""
 

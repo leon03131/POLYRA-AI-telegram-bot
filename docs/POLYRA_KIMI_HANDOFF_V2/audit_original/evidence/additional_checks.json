@@ -1,0 +1,27 @@
+[
+  {
+    "id": "ADMIN_ROUTE_404",
+    "status": "reproduced",
+    "root": 200,
+    "admin": 404,
+    "scope": "Production create_app static mount with minimal index.html, not frontend build."
+  },
+  {
+    "id": "DISABLED_DB_CREDENTIAL_USES_ENV",
+    "status": "reproduced",
+    "returned_env_fallback": true
+  },
+  {
+    "id": "DELETE_CHAT_ERASES_USAGE_LEDGER",
+    "status": "reproduced",
+    "before_count_tokens": [
+      1,
+      300
+    ],
+    "after_count_tokens": [
+      0,
+      null
+    ],
+    "scope": "Original declarative models on SQLite with foreign_keys=ON; corroborated by migration 0002 CASCADE."
+  }
+]

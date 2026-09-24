@@ -1,0 +1,623 @@
+[
+  {
+    "id": "A01",
+    "priority": "P1",
+    "title": "Настройки существующего чата ломаются из-за преобразования UUID в число",
+    "files": [
+      "miniapp/src/pages/ChatSettingsPage.tsx:26-38",
+      "miniapp/src/api/types.ts:50-61",
+      "app/api/routes/chats.py:46-58"
+    ],
+    "proof": "Подтверждено кодом и отдельной JavaScript-проверкой. Backend возвращает id как строковый UUID, frontend объявляет Chat.id числом и выполняет Number(id). Для UUID результат NaN; сравнение c.id === chatId не находит чат. Та же неверная типизация встречается у MemoryItem, GeminiProject и AuditEntry, хотя не каждый их CRUD из-за этого уже сломан.",
+    "impact": "Страница настроек реального чата показывает «Чат не найден»; после поверхностной правки поиска мутации всё ещё могли бы обращаться к /chats/NaN.",
+    "fix": "Ввести UUID/string-типы на всём пути API—hooks—components; убрать Number(id); по возможности генерировать клиентские типы из OpenAPI. Проверить BackButton-условие App.tsx, рассчитанное на цифровые id.",
+    "acceptance": "E2E: создать чат, открыть по UUID, изменить модель/thinking/prompt, перезагрузить, проверить сохранённые значения. Ни один запрос не содержит NaN. Типы всех public UUID согласованы с API."
+  },
+  {
+    "id": "A02",
+    "priority": "P2",
+    "title": "Команда /admin ведёт на 404; menu button настраивается не при startup",
+    "files": [
+      "app/bot/routers/commands.py:155-168",
+      "miniapp/src/App.tsx",
+      "app/api/app.py:65-67",
+      "app/main.py:110-118"
+    ],
+    "proof": "/admin формирует URL /admin, но frontend использует HashRouter. StaticFiles(html=True) не делает универсальный SPA fallback. В изолированном тесте настоящего create_app с index.html: / → 200, /admin → 404. В startup вызывается setup_bot_commands, но menu button устанавливается только при /start.",
+    "impact": "Владелец не открывает админ-раздел по обещанной команде; глобальная кнопка меню зависит от предыдущего /start.",
+    "fix": "Для HashRouter использовать /#/admin и единый конструктор Mini App URL. Настраивать общий MenuButtonWebApp при startup, оставив корректный per-chat путь при необходимости.",
+    "acceptance": "Проверить URL каждой команды и открытие в Telegram. /admin открывает административный маршрут, прямой запуск Mini App работает, menu button есть после чистого старта."
+  },
+  {
+    "id": "A03",
+    "priority": "P1",
+    "title": "Пустой список разрешённых моделей превращается в доступ ко всем моделям",
+    "files": [
+      "miniapp/src/admin/AdminUsersPage.tsx:206-211",
+      "app/services/admin.py:222-245",
+      "app/db/repositories/access.py:68-73",
+      "app/services/access.py:109-114"
+    ],
+    "proof": "UI может отправить allowed_models=[]. Сервис удаляет старые разрешения и не вставляет новых. Репозиторий трактует отсутствие строк как None, то есть отсутствие ограничений. Диагностический тест воспроизводит переход empty rows → unrestricted policy.",
+    "impact": "Владелец снимает все галочки, рассчитывая запретить модели, а приглашённый пользователь получает все доступные модели. Это ошибка авторизации, а не просто отображения.",
+    "fix": "Разделить явные режимы unrestricted и allowlist; пустой allowlist должен запрещать всё. Сделать безопасную миграцию существующих правил и использовать одну политику на API и генерации.",
+    "acceptance": "Через настоящий admin API сохранить null, [], [одна модель] и проверить фактический вызов провайдера: соответственно все, ни одной, только одна. После reload UI сохраняет различие."
+  },
+  {
+    "id": "A04",
+    "priority": "P1",
+    "title": "Admin authorization доверяет флагу is_owner помимо numeric Telegram ID",
+    "files": [
+      "app/api/dependencies.py:33-35",
+      "app/bot/routers/commands.py:155-168",
+      "app/api/routes/auth.py",
+      "KNOWN_ISSUES.md:39-42"
+    ],
+    "proof": "Проверка owner принимает user.is_owner OR совпадение numeric ID; команда /admin ориентируется на флаг. KNOWN_ISSUES уже признаёт, что прежний is_owner автоматически не снимается. Самостоятельного повышения прав обычным внешним пользователем в проверенном коде не найдено: проблема проявляется при устаревшем/ошибочном флаге в БД.",
+    "impact": "Не тот Telegram ID способен сохранить административные права, нарушая жёсткий инвариант ТЗ.",
+    "fix": "Единая функция owner identity: только telegram_user_id == 795063564 либо явно согласованный владельцем конфигурационный идентификатор. Флаг БД не должен давать полномочия. Миграцией очистить некорректные флаги.",
+    "acceptance": "Non-owner с is_owner=True получает 403 на каждом admin endpoint; owner с is_owner=False сохраняет доступ. Username не участвует в решении."
+  },
+  {
+    "id": "A05",
+    "priority": "P1",
+    "title": "Нет атомарного захвата чата и пользовательских лимитов перед генерацией",
+    "files": [
+      "app/services/generation.py:323-347",
+      "app/services/generation.py:650-719",
+      "app/services/generation.py:787-807",
+      "app/db/models/generation_run.py:17-31"
+    ],
+    "proof": "Проверка find_active_for_chat выполняется в _prepare, а запись в in-memory registry — после нескольких await и создания run. DB не содержит уникального ограничения на активную генерацию чата. Пользовательские concurrent/daily limits также читаются до создания reservation. Это подтверждённая check-then-act гонка; реальный параллельный PostgreSQL-прогон в данной среде не выполнен.",
+    "impact": "Два сообщения могут одновременно пройти проверки, смешать историю и превысить ограничения. In-memory registry не защищает несколько процессов.",
+    "fix": "Захватывать per-chat lock до чтения/изменения истории и дополнять DB-инвариантом: partial unique index для queued/running либо эквивалентной транзакционной блокировкой. Отдельно атомарно резервировать per-user concurrency и суточные лимиты.",
+    "acceptance": "Barrier-тест с двумя соединениями PostgreSQL: ровно один запуск на один чат; ограничения пользователя соблюдаются между разными чатами и процессами. Нет потерянных сообщений и оставшихся locks после исключения."
+  },
+  {
+    "id": "A06",
+    "priority": "P1",
+    "title": "Done обрывает поток до usage и финализации Gemini-пула",
+    "files": [
+      "app/services/generation.py:595-648",
+      "app/llm/providers/alibaba.py:243-260",
+      "app/llm/gemini/pool.py:219-230",
+      "app/context/compactor.py:114-125"
+    ],
+    "proof": "_consume и collect_text делают break на Done. Alibaba может отдавать Usage следующим SSE chunk после finish_reason. GeminiProjectPool вызывает report_success/reconcile после yield событий провайдера, в том числе Done. Два отдельных воспроизведения: Alibaba даёт TextDelta, Done, Usage, но consumer Usage не получает; Gemini consumer с break не вызывает mark_success и reconcile, даже при последующем aclose.",
+    "impact": "Статистика, per-user token limits и локальные Gemini TPM недостоверны; успешность проектов не отмечается. Затронуты и внутренние summary/title/memory запросы.",
+    "fix": "Определить единый контракт: Done ровно один раз после получения usage и обязательной финализации. Не оставлять критические side effects после последнего yield. Закрывать все уровни async iterator/HTTP response через finally/aclosing на success/error/cancel.",
+    "acceptance": "Прогнать production provider → factory → pool → GenerationService на записанном SSE: usage-trailer учтён, health/reconcile выполнены ровно один раз, transport закрыт. Аналогичные проверки для внутренних задач и отмены."
+  },
+  {
+    "id": "A07",
+    "priority": "P1",
+    "title": "Даже после исправления Done расход разных tool-раундов не суммируется",
+    "files": [
+      "app/services/generation.py:451-452",
+      "app/services/generation.py:820-934",
+      "app/db/models/generation_run.py:33-41",
+      "app/db/repositories/generation_runs.py:30-66"
+    ],
+    "proof": "usage в _stream_loop заменяется последним outcome. В cancelled run finish не получает token fields. gemini_project_id объявлен в модели, но фактически не записывается при выдаче ключа/завершении запуска. Для ошибок после частичного ответа также нет полноценного учёта уже потраченного расхода.",
+    "impact": "Один пользовательский запрос с несколькими вызовами LLM считается как последний вызов; token limits и статистика занижены. Нельзя связать ошибку с выбранным Gemini-проектом.",
+    "fix": "Разделить per-provider-call usage и агрегат generation_run, суммировать только отдельные вызовы, не cumulative chunks одного вызова. Хранить project selection/attempts, cancellation/error usage и различать unknown usage от нуля.",
+    "acceptance": "Два tool-раунда с usage 100/20 и 200/30 дают 300/50; repeated cumulative usage не удваивается. Cancelled/failed вызовы сохраняют известные метрики и project id."
+  },
+  {
+    "id": "A08",
+    "priority": "P1",
+    "title": "Удаление чата обнуляет суточный учёт запросов пользователя",
+    "files": [
+      "app/db/models/generation_run.py:18-25",
+      "app/db/migrations/versions/0002_chat_core.py",
+      "app/db/repositories/generation_runs.py:68-87",
+      "app/api/routes/chats.py:170-179"
+    ],
+    "proof": "generation_runs.chat_id имеет ON DELETE CASCADE. Дневные лимиты считаются по существующим generation_runs. Удаление своего чата доступно пользователю. На исходных ORM-моделях с SQLite foreign_keys=ON воспроизведено: до удаления 1 run/300 токенов, после — 0 runs. Это проверка CASCADE-семантики, не замена PostgreSQL integration test.",
+    "impact": "Приглашённый пользователь может удалить чат, создать новый и снова расходовать дневной лимит. Одновременно искажается административная статистика.",
+    "fix": "Вынести usage/reservations в отдельный долговечный ledger, не удаляемый вместе с разговором; либо безопасно отвязать минимальные метрики от chat через SET NULL/tombstone. Удаление содержимого чата и сохранение минимального учёта должны иметь явную политику приватности.",
+    "acceptance": "Через реальный API исчерпать requests/day, удалить все свои чаты, создать новый: запрос всё ещё отклонён до следующего окна. История удаляется, минимальный ledger остаётся."
+  },
+  {
+    "id": "A09",
+    "priority": "P1",
+    "title": "Gemini quota check/reserve не атомарны, reconcile попадает в другое окно",
+    "files": [
+      "app/llm/gemini/quota.py:98-118",
+      "app/llm/gemini/store_db.py:80-122",
+      "app/db/repositories/gemini.py:237-306"
+    ],
+    "proof": "get_minute_usage, get_daily_usage и reserve выполняются раздельно, DB-адаптер открывает отдельные сессии. ON CONFLICT защищает прибавление, но не условие допуска. Barrier-воспроизведение: лимит RPM=1, два запроса оба разрешены. Reconcile вычисляет minute/day по времени завершения: запрос предыдущей минуты получает токены в новой, где requests_count=0.",
+    "impact": "Пул превышает локальные ограничения и ведёт неверную статистику на границах окон; TPM без reservation не ограничивает уже запущенные запросы.",
+    "fix": "Единая транзакционная check-and-reserve операция с блокировкой/условным UPDATE. Возвращать reservation_id и исходные minute/day, выполнять idempotent reconcile именно reservation. Добавить bounded token reservation и освобождение/сверку при отмене.",
+    "acceptance": "PostgreSQL: конкурентные RPM/RPD/TPM проверки без превышения; тесты перехода минуты, Pacific day и DST; повторный reconcile не удваивает расход."
+  },
+  {
+    "id": "A10",
+    "priority": "P2",
+    "title": "Cooldown и retry Gemini не соответствуют требуемой области действия",
+    "files": [
+      "app/llm/gemini/pool.py:162-190",
+      "app/llm/gemini/pool.py:195-244",
+      "app/db/models/gemini.py"
+    ],
+    "proof": "report_error прямо указывает, что model_id не влияет на cooldown. 429 охлаждает проект целиком. PERMISSION_DENIED автоматически отключает credential, хотя такой код сам по себе не доказывает постоянную неисправность ключа. Для 5xx/network/timeout реализован переход к следующему проекту, но нет требуемого небольшого bounded retry того же проекта.",
+    "impact": "Лимит одной модели блокирует другие модели того же проекта, в том числе внутренние задачи; временные/модельные 403 могут отключать рабочие ключи.",
+    "fix": "Отделить credential health от project+model cooldown; классифицировать 403 по документированным признакам. Ввести ограниченный retry с jitter, общим deadline и максимум одним проходом пула; после видимого текста не перезапускать ответ.",
+    "acceptance": "429 модели A не блокирует B; 400/safety не обходят пул; 401 отключает ключ; transient 403/5xx не приводят к бесконечным попыткам; model_id никогда не меняется."
+  },
+  {
+    "id": "A11",
+    "priority": "P1",
+    "title": "Stop не гарантирует немедленного прерывания HTTP stream и tools",
+    "files": [
+      "app/services/generation.py:106-112",
+      "app/services/generation.py:473-494",
+      "app/llm/providers/alibaba.py",
+      "app/llm/providers/gemini.py"
+    ],
+    "proof": "GenerationRegistry.stop устанавливает asyncio.Event, но не прерывает stored task/активное чтение. Адаптеры проверяют cancellation после получения следующей строки; read timeout — 300 секунд. В пачке tool calls cancellation проверяется после всей пачки, а не перед каждым вызовом и во время ожидания.",
+    "impact": "Кнопка Stop может долго не освобождать соединение и продолжать выполнение инструментов/расход квоты, особенно если провайдер молчит.",
+    "fix": "Дать generation supervisor управление активным task/response, прерывать ожидание transport и tools, проверять token перед каждым side effect. Сделать идемпотентный finalizer, сохраняющий partial и cancelled status даже при CancelledError.",
+    "acceptance": "Mock stream, навсегда ожидающий следующий chunk, прекращается за локально заданный короткий deadline без ожидания read timeout. Ни один следующий tool в batch после Stop не запускается. Partial сохранён один раз, ресурсы закрыты."
+  },
+  {
+    "id": "A12",
+    "priority": "P1",
+    "title": "Memory Off/Web Off не являются полной серверной политикой tools",
+    "files": [
+      "app/services/generation.py:397-405",
+      "app/services/generation.py:464-475",
+      "app/services/generation.py:749-758",
+      "app/llm/tools/runner.py:67-78"
+    ],
+    "proof": "memory_enabled влияет на retrieval/extraction, но remember/forget_memory остаются в advertised tools при разрешении memory у пользователя. Web Off убирает описания web-tools, однако ToolRunner получает полный registry и проверяет только grant, не фактически разрешённый набор текущего запроса.",
+    "impact": "При выключенной памяти модель всё ещё может записывать/удалять память. Необъявленный web tool, возвращённый моделью, может быть исполнен вопреки настройке чата.",
+    "fix": "Вычислять effective allowed tools один раз из global/user/chat/model policy и использовать его и в LLM request, и в runner. Перепроверять право и cancellation перед side effect; неизвестные/необъявленные вызовы отклонять.",
+    "acceptance": "Memory Off: нет retrieval/extraction/remember/forget. Web Off: подставленный web_search/open_url получает denied без сети. Проверить те же ограничения после изменения прав между tool-раундами."
+  },
+  {
+    "id": "A13",
+    "priority": "P1",
+    "title": "Настройки Admin → System сохраняются, но генерация их не читает",
+    "files": [
+      "app/api/routes/admin_system.py:73-115",
+      "app/main.py:45-87",
+      "app/services/generation.py:749-782",
+      "app/config.py"
+    ],
+    "proof": "Admin API читает/пишет system_settings. Runtime строит ContextBuilder, Compactor и GenerationService из environment Settings; чтения SystemSettingRepository в пути генерации нет. Даже перезапуск сам по себе не подключает эти DB-значения. memory_extraction_min_chars из Settings дополнительно не передан конструктору MemoryExtractor.",
+    "impact": "UI сообщает «Сохранено», но system prompt, default model/thinking, context/tool/memory limits не управляют фактическим поведением бота.",
+    "fix": "Сделать единый SettingsService с явно определённым приоритетом chat → user → DB system → bootstrap env, типизированными effective settings и инвалидацией cache. Честно отделить live-настройки от restart-required параметров.",
+    "acceptance": "Изменение через Admin API отражается в следующем настоящем LLMRequest и поведении compaction/tools, а GET показывает те же effective значения. Проверить наследование null и перезапуск."
+  },
+  {
+    "id": "A14",
+    "priority": "P1",
+    "title": "Отключённый Alibaba credential снова активируется через env fallback",
+    "files": [
+      "app/services/credentials.py:10-23",
+      "app/services/llm_factory.py:48-63",
+      "app/api/routes/admin_providers.py"
+    ],
+    "proof": "Если DB credential существует, но enabled=False, get_provider_api_key возвращает env_fallback. Изолированная проверка actual function с disabled-записью и демонстрационным env key подтверждает возврат ключа.",
+    "impact": "Владелец выключает провайдера в Mini App, но бот продолжает обращаться к нему, когда bootstrap ALIBABA_API_KEY оставлен в окружении.",
+    "fix": "Использовать env fallback только при отсутствии DB-конфигурации. Явно отключённый credential — абсолютный запрет. Не смешивать provider enablement с наличием/отсутствием секрета; закрывать устаревшие cached clients.",
+    "acceptance": "Матрица absent/enabled/disabled × env present/absent; disabled всегда означает ноль HTTP-вызовов. Переключение вступает в силу без скрытого возврата к bootstrap key."
+  },
+  {
+    "id": "A15",
+    "priority": "P1",
+    "title": "История теряется из контекста до гарантированной суммаризации",
+    "files": [
+      "app/services/generation.py:707-709",
+      "app/services/generation.py:773-784",
+      "app/context/builder.py:107-147",
+      "app/db/models/chat_summary.py"
+    ],
+    "proof": "В _prepare берутся только recent_history_limit*2 сообщений (по умолчанию 40), независимо от полного объёма ещё не покрытой summary истории. При наличии любой summary builder оставляет keep_recent (10), но не получает covered_until_message_id. Воспроизведение: 20 ещё не покрытых сообщений + старая summary → только последние 10, needs_compaction=False.",
+    "impact": "Модель забывает числа, решения и задачи, хотя они есть в PostgreSQL и могли бы поместиться в контекст. Некоторые сегменты выпадают без попадания в summary.",
+    "fix": "Строить контекст по точной границе покрытия summary, а не по факту её наличия. Выбирать весь непокрытый сегмент в рамках бюджета; перед исключением старого материала создавать/обновлять summary либо явно сигнализировать невозможность вместить контекст. Сохранять raw history неизменной.",
+    "acceptance": "Диалоги на 60–100 сообщений: факт из раннего непокрытого сообщения остаётся в raw context или summary. После первой summary новые сообщения не выпадают до следующей compaction. Проверить реальные выборки PostgreSQL."
+  },
+  {
+    "id": "A16",
+    "priority": "P1",
+    "title": "TokenBudget не ограничивает фактически отправляемый запрос",
+    "files": [
+      "app/context/builder.py:107-147",
+      "app/context/token_budget.py",
+      "app/services/generation.py:430-437",
+      "app/services/generation.py:776-784"
+    ],
+    "proof": "Recent window сохраняется даже при превышении бюджета. Current message добавляется после budget check; описания tools собираются позже, новые tool results между раундами не перебюджетируются. max_output_tokens не передаётся в пользовательский LLMRequest, хотя budget резервирует output. Воспроизведение: при 80 доступных токенах builder возвращает примерно 1000 и не просит compaction.",
+    "impact": "400/context overflow, непредсказуемый объём ответа/расход и отказ compaction именно на тяжёлых запросах. Оценка chars/token допустима как оценка, но не оправдывает игнорирование установленного предела.",
+    "fix": "Считать конечный request: system, memories, summary, recent, current, images, tools, tool results, output reserve и margin. Согласовать max_output_tokens с budget/model capabilities; повторять проверку перед каждым LLM call. Для слишком большого current input — понятный отказ/контролируемое уменьшение, не тихая потеря смысла.",
+    "acceptance": "Property/boundary tests полного payload; большой current message, image и много tool results не обходят лимит. В каждом request max_output_tokens согласован с budget. Нет теста, объявляющего превышение бюджета нормой."
+  },
+  {
+    "id": "A17",
+    "priority": "P1",
+    "title": "Пустой JSON считается успешной summary; фоновые compaction могут перезаписываться",
+    "files": [
+      "app/context/compactor.py:91-107",
+      "app/context/compactor.py:220-304",
+      "app/db/repositories/chat_summaries.py:24-47",
+      "app/services/generation.py:546-593"
+    ],
+    "proof": "_normalize_summary принимает {} и превращает его в пустые поля; это воспроизведено. Дальше summary и covered_until могут быть сохранены как успешные. Compactor загружает list_all, не ограничивает размер внутреннего prompt и не использует optimistic version/CAS при обновлении summary. Фоновые задачи не сериализованы по chat_id.",
+    "impact": "Пустая/неполная summary может пометить важную историю как покрытую. Более поздно завершившаяся старая задача способна перезаписать новую summary; большой накопленный сегмент перегружает внутреннюю модель.",
+    "fix": "Строгая schema плюс семантические проверки непустого результата; максимум один repair, при неудаче границу покрытия не менять. Порционный compaction с бюджетом внутренней модели; versioned CAS или per-chat worker/lock и snapshot boundary.",
+    "acceptance": "{}, неверные типы, пустая summary для непустого сегмента не продвигают coverage. Две задачи с обратным порядком завершения не откатывают boundary. Большой сегмент обрабатывается ограниченными порциями."
+  },
+  {
+    "id": "A18",
+    "priority": "P1",
+    "title": "Фото не сохраняет Telegram file_id и исчезает из последующей истории LLM",
+    "files": [
+      "app/bot/routers/photos.py:59-64",
+      "app/db/repositories/messages.py:28-61",
+      "app/context/builder.py:39-46",
+      "app/services/generation.py:255-265",
+      "app/services/chats.py:89-117"
+    ],
+    "proof": "Текущий photo router передаёт data_base64 и MIME, но не telegram_file_id. Репозиторий правильно не пишет base64 в БД, однако после этого у image part не остаётся файла. Репродукция actual add_message подтверждает пустой telegram_file_id. В builder/legacy build_messages старые image parts дополнительно отбрасываются. В ChatService есть старый корректный способ записи file_id, но текущий router его не использует.",
+    "impact": "Первый ответ на фото может работать, а следующий вопрос «что ещё на этой фотографии?» уже не получает само изображение. История в БД не позволяет восстановить фото.",
+    "fix": "Сохранять file_id/file_unique_id, размер, MIME и необходимые metadata; внедрить bounded rehydration изображения при построении multimodal context. Существующие неполные записи обрабатывать явно как невосстановимые, не выдумывать отсутствующие данные.",
+    "acceptance": "Photo+caption → запись file_id без base64 → перезапуск → follow-up получает ImagePart. Неподдерживающая фото модель выдаёт понятный отказ и список разрешённых image-capable моделей."
+  },
+  {
+    "id": "A19",
+    "priority": "P1",
+    "title": "SSRF-защита оставляет DNS rebinding / resolve-then-connect окно",
+    "files": [
+      "app/security/ssrf.py:50-71",
+      "app/search/fetcher.py:91-108",
+      "app/search/fetcher.py:140-148",
+      "KNOWN_ISSUES.md:36-38"
+    ],
+    "proof": "URL проверяется резолвером, но затем httpx подключается к исходному hostname с отдельным DNS resolution. Проверенный IP не привязан к соединению. Private IP/scheme/redirect checks уже есть и полезны; оставшийся риск прямо признан авторами в KNOWN_ISSUES. Live-эксплуатация против сети владельца не выполнялась.",
+    "impact": "При смене DNS ответа между проверкой и connect open_url потенциально обращается во внутреннюю сеть/metadata. При доступном web tool это существенный риск, хотя наличие конкретной достижимой внутренней цели не проверено.",
+    "fix": "Использовать transport/resolver, соединяющийся только с проверенным IP с правильными Host и TLS SNI; сохранять все redirect checks. Дополнить egress-запретом private/link-local/metadata и deadline. Нельзя исправлять отключением TLS verification.",
+    "acceptance": "Детерминированный тест public DNS при validation → private DNS при connect блокируется. Проверить IPv4/IPv6, redirects, mixed A/AAAA, TLS hostname и отсутствие реального соединения к запрещённому адресу."
+  },
+  {
+    "id": "A20",
+    "priority": "P1",
+    "title": "Fallback Telegram отправляет raw LLM text с глобальным HTML parse_mode",
+    "files": [
+      "app/bot/dispatcher.py:30-38",
+      "app/bot/streaming/draft.py:150-180",
+      "app/bot/streaming/draft.py:218-251",
+      "app/services/generation.py:880-885",
+      "app/bot/routers/commands.py:127-135"
+    ],
+    "proof": "Bot создан с default parse_mode=HTML. send_message_draft/send_message/edit_message_text и отправка partial не задают parse_mode=None и не экранируют произвольный текст. Текст с <div>, незакрытым тегом или частью кода способен вызвать TelegramBadRequest. Это протокольный вывод из кода и документации; live Telegram-проверка не выполнена.",
+    "impact": "Пользователь не получает ответ в fallback-режиме, хотя run может стать completed. Неэкранированное название чата также ломает форматированную служебную реплику.",
+    "fix": "Для plain transport явно parse_mode=None либо безопасный renderer/entities с корректным разбиением. Не отправлять произвольный LLM HTML как доверенную разметку; экранировать пользовательские фрагменты в служебных HTML-ответах.",
+    "acceptance": "Тексты с HTML/XML, сравнениями, амперсандами, code fences и emoji доходят без ошибок во всех трёх tiers и при Stop. Ошибка финальной доставки отражается отдельно от успешного завершения LLM."
+  },
+  {
+    "id": "A21",
+    "priority": "P2",
+    "title": "Длинный rich answer/partial обрезается; final edit может дублировать ответ",
+    "files": [
+      "app/bot/streaming/draft.py:31-74",
+      "app/bot/streaming/draft.py:130-182",
+      "app/services/generation.py:877-885"
+    ],
+    "proof": "Финальная rich-отправка использует _tail(text, RICH_LIMIT), то есть тот же принцип обрезки, что и временный draft. _tail добавляет префикс сверх выбранного хвоста; это может превышать 32768. При Stop частичный ответ ограничивается первым MESSAGE_LIMIT фрагментом. В tier 3 «message is not modified» попадает в общий fallback, отправляющий новое сообщение.",
+    "impact": "Длинный ответ может потерять начало, уйти в неожиданный fallback или продублироваться. В БД и Telegram отображается разный partial.",
+    "fix": "Tail допустим только для временного draft. Final и cancelled partial разбивать без потерь по настоящим лимитам Telegram, учитывая префиксы/разметку. Обрабатывать not-modified как успешную идемпотентную финализацию.",
+    "acceptance": "Ответы 4096+, 32768+ и длинный partial после Stop сохраняют весь текст и порядок. Повторная finalize не создаёт дубликат. Отдельно проверить Unicode и границы форматирования."
+  },
+  {
+    "id": "A22",
+    "priority": "P2",
+    "title": "Throttle не обрабатывает retry_after и ломается после первой ошибки flush",
+    "files": [
+      "app/bot/streaming/draft.py:110-127",
+      "app/bot/streaming/draft.py:189-251",
+      "tests/unit/test_draft_streamer.py"
+    ],
+    "proof": "append вызывает flush только когда _last_flush не None. Если первый force flush упал transient ошибкой, значение остаётся None и автообновлений больше нет до финала. После более поздних ошибок timestamp остаётся старым: каждый новый delta может снова инициировать запрос. TelegramRetryAfter не имеет отдельной обработки.",
+    "impact": "Потеря streaming после первого сетевого сбоя либо лавина повторов и downgrade при 429. Комментарии/документация о backoff не соответствуют реализации.",
+    "fix": "Разделить last_success и next_attempt_at, учитывать retry_after, применять bounded backoff/jitter и coalescing буфера. Не менять capability tier при временном rate limit. Сохранять deadline отмены независимо от Telegram network retry.",
+    "acceptance": "Первый flush падает — последующий текст автоматически возобновляет поток. Серия 429 не превышает разрешённую частоту; счётчик вызовов не растёт на каждый token. Stop работает во время backoff."
+  },
+  {
+    "id": "A23",
+    "priority": "P2",
+    "title": "Незавершённый/повреждённый SSE может быть принят за успешный ответ",
+    "files": [
+      "app/llm/providers/alibaba.py",
+      "app/llm/providers/gemini.py",
+      "app/services/generation.py:595-648"
+    ],
+    "proof": "SSE-парсеры пропускают некоторые malformed payloads; consumer допускает обычное завершение iterator без обязательного terminal Done. Нет полной проверки контракта «получен валидный finish vs соединение тихо оборвалось». Это статический вывод; комбинации реальных provider/proxy отказов требуют fixture/live проверки.",
+    "impact": "Обрезанный ответ и неполный tool call могут выглядеть как completed; provider/proxy ошибки не различаются с корректным EOF.",
+    "fix": "Явная state machine SSE: validate frame/chunk structure, собирать tool calls до полного конца, классифицировать malformed response/unexpected EOF. При partial не выполнять молчаливый повтор с другим ключом и не обозначать незавершённый ответ как успешный.",
+    "acceptance": "Фикстуры EOF до finish, malformed JSON, error frame после text, пустой choices/usage trailer, fragment tool args, [DONE] и штатный конец каждого провайдера дают определённый ожидаемый статус."
+  },
+  {
+    "id": "A24",
+    "priority": "P2",
+    "title": "Архив и длинные списки чатов недоступны через Mini App",
+    "files": [
+      "app/api/routes/chats.py:79-86",
+      "app/db/repositories/chats.py:29-43",
+      "miniapp/src/pages/ChatsPage.tsx:147-150",
+      "miniapp/src/pages/MemoryPage.tsx",
+      "app/api/routes/memory.py"
+    ],
+    "proof": "GET /chats возвращает только неархивные записи и использует repository limit=50 без API pagination. UI пытается выделять архивные чаты из этого же ответа. Поэтому архивная вкладка не получает данные, а старые чаты за лимитом нельзя выбрать. Аналогично следует довести пагинацию управления памятью, а не ограничиваться первыми записями.",
+    "impact": "Пользователь архивирует чат и теряет путь к его восстановлению в интерфейсе; часть истории/памяти становится неуправляемой при росте данных.",
+    "fix": "API list с cursor/pagination и archived filter; отдельное получение чата по UUID. Согласовать current-chat при archive/delete/open, явно решить поведение активной генерации. UI подгружает страницы и корректно восстанавливает архив.",
+    "acceptance": "Создать 60 чатов, архивировать несколько, открыть и восстановить самый старый. Удаление/архив текущего чата корректно обновляет выбор. Все записи памяти доступны постранично."
+  },
+  {
+    "id": "A25",
+    "priority": "P2",
+    "title": "Effective settings и модельная валидация расходятся между UI, API и runtime",
+    "files": [
+      "app/api/routes/chats.py:46-58",
+      "miniapp/src/pages/ChatSettingsPage.tsx:30-38",
+      "miniapp/src/components/ChatSettingsForm.tsx",
+      "app/api/routes/settings.py:67-80",
+      "app/services/generation.py:171-195"
+    ],
+    "proof": "_chat_out не возвращает system_prompt_override; UI сбрасывает prompt в пустую строку и не загружает существующий override. Наследуемая системная модель не отражается как effective model для thinking selector. Runtime при неизвестном сохранённом model_id молча выбирает default_model; проверки выбора не везде учитывают enabled. При явном null новая thinking-валидация может использовать прежнюю модель через or.",
+    "impact": "Невозможно достоверно увидеть/редактировать действующий prompt; сохранение способно очистить override. Удалённая/неизвестная модель подменяется без согласия, хотя обычный failover между валидными моделями в коде не обнаружен.",
+    "fix": "Возвращать raw overrides и effective settings отдельно. Валидировать конечную комбинацию model/thinking с учётом field presence и null, enabled/internal_only/user permissions. Неизвестная или отключённая выбранная модель — понятный отказ с предложением выбрать, а не fallback.",
+    "acceptance": "Read/edit/reload существующего prompt без потерь; наследование global/user/chat; одновременный PATCH model=null+thinking; disabled/unknown model не вызывает другую модель. Исправить тест, который сейчас ожидает unknown-model fallback."
+  },
+  {
+    "id": "A26",
+    "priority": "P2",
+    "title": "Admin не может снять числовой лимит; обещанная остановка при revoke не реализована",
+    "files": [
+      "app/services/admin.py:91-100",
+      "miniapp/src/admin/AdminUsersPage.tsx:24-30",
+      "miniapp/src/admin/AdminUsersPage.tsx:95-103",
+      "app/services/generation.py:464-475",
+      "app/api/routes/admin_access.py"
+    ],
+    "proof": "UI передаёт null для очищенного requests_per_day/token_limit, а service отбрасывает None, сохраняя старое значение. Права передаются в генерацию snapshot-ом; ban/revoke/suspend не останавливают уже запущенные задачи. В UI при suspend обещано, что генерации будут остановлены. На новых incoming updates доступ проверяется — это не полный обход ban.",
+    "impact": "Администратор видит ввод «без лимита», но старый лимит остаётся. Запущенные операции продолжаются после отзыва доступа и могут делать дополнительные tool/LLM calls.",
+    "fix": "Различать unset и explicit null, добавить bounds числовых полей. Определить и реализовать policy немедленного revoke: отменять задачи пользователя и перепроверять права перед новым внешним вызовом/side effect.",
+    "acceptance": "Установить лимит → очистить → прочитать null и проверить unlimited. Во время заблокированного stream/tool отозвать grant: новые операции не стартуют, состояние корректно финализируется."
+  },
+  {
+    "id": "A27",
+    "priority": "P2",
+    "title": "Capability probe неполон и не управляет runtime capabilities",
+    "files": [
+      "scripts/smoke_providers.py:69-70",
+      "scripts/smoke_providers.py:210-235",
+      "scripts/smoke_providers.py:603-697",
+      "app/llm/registry.py",
+      ".agents/reports/probe_20260918_130436.json"
+    ],
+    "proof": "В списках probe нет gemini-3.7-flash и qwen3.8-max. Оба сохранённых JSON проверяют четыре Alibaba-модели, Gemini отмечен skipped. Результаты записываются в JSON/рекомендации stdout, но runtime cache/provider_health и обновление UI не подключены. Thinking check способен вернуть accepted без обязательных TextDelta/Done; exit code всегда 0. _collect probe читает поток до конца, в отличие от production _consume, поэтому probe не ловит A06.",
+    "impact": "Успешный ручной probe не доказывает работу пользовательской генерации; интерфейс не адаптируется к endpoint/credential-specific возможностям и их изменению.",
+    "fix": "Перебирать registry без пропусков, минимально проверять текст/stream/tool loop/image/thinking/structured output, различать accepted parameter и реально подтверждённое поведение. Хранить versioned результаты по endpoint/credential/model с timestamp/TTL; до подтверждения безопасный provider-default. Добавить режим --strict с ненулевым кодом ошибки и дешёвые явные live flags.",
+    "acceptance": "Отчёт охватывает все 9 моделей, где internal model отдельно помечена. Изменение результата probe меняет API capabilities/UI. Реальные вызовы выключены по умолчанию; no-key/skip не считается pass. Ни один ключ не появляется в логах/JSON/аргументах процесса."
+  },
+  {
+    "id": "A28",
+    "priority": "P2",
+    "title": "Полная административная панель из ТЗ не реализована",
+    "files": [
+      "miniapp/src/admin/AdminLayout.tsx",
+      "miniapp/src/admin/AdminProvidersPage.tsx",
+      "miniapp/src/admin/AdminGeminiPage.tsx",
+      "app/api/routes/admin_providers.py",
+      "app/api/routes/admin_gemini.py",
+      "app/api/app.py:46-60"
+    ],
+    "proof": "В панели есть реальные Users, Gemini Pool, Providers, Search, System, Audit и краткий Dashboard, но нет полноценного Models CRUD/enable/capabilities, Alibaba Run Smoke Test и model health. Для Gemini нет требуемых Test project, Reset Local Counters и просмотра фактических minute/day counters. Provider health runtime storage из ТЗ отсутствует. Admin Memory и полноценная диагностика generation errors также не доведены.",
+    "impact": "Владелец вынужден менять код/SQL или запускать скрипты вместо предусмотренного управления из Mini App. Наличие раздела не означает выполнения всех его операций.",
+    "fix": "Реализовать недостающие API+UI вертикальными сценариями, с owner guard, audit, masked secrets, реальным effect и безопасными лимитами smoke tests. Не добавлять фиктивные кнопки, которые только меняют JSON/показывают success.",
+    "acceptance": "Матрица каждого обязательного admin action: UI → API → DB/runtime effect → audit entry → reload. Тесты non-owner 403, ключ никогда не возвращается полностью, endpoint Alibaba остаётся read-only."
+  },
+  {
+    "id": "A29",
+    "priority": "P2",
+    "title": "Импорт Gemini keys ошибочно считает последние четыре символа идентификатором ключа",
+    "files": [
+      "app/api/routes/admin_gemini.py:107-148",
+      "scripts/import_gemini_keys.py:64-91",
+      "app/db/models/gemini.py"
+    ],
+    "proof": "Bulk API дедуплицирует key_hint=api_key[-4:]. Разные реальные ключи с одинаковым суффиксом будут ошибочно пропущены. Отдельные add/CLI пути могут добавить одинаковый ключ под разными именами, создавая фиктивно разные quota buckets. Google project identity отдельно не проверяется.",
+    "impact": "Владелец импортирует 30 проектов, но часть пропадает либо один реальный bucket учитывается несколько раз. Это не доказательство, что конкретные 30 ключей владельца совпадают; это дефект алгоритма.",
+    "fix": "Использовать стабильный keyed fingerprint полного ключа для dedup, не раскрывая ключ, и хранить явную identity проекта. Согласовать API/CLI импорт, idempotency и понятные причины пропуска. Не считать шифротекст или masked suffix уникальной identity.",
+    "acceptance": "Два разных ключа с одним suffix импортируются; повтор того же ключа не создаёт вторую запись; одинаковый Google project не обходит quota policy. Dry run не пишет БД, логи не содержат секретов."
+  },
+  {
+    "id": "A30",
+    "priority": "P2",
+    "title": "HTTP clients поиска и провайдеров не имеют управляемого lifecycle",
+    "files": [
+      "app/search/manager.py:106-128",
+      "app/search/manager.py:194-207",
+      "app/search/serper.py",
+      "app/search/brave.py",
+      "app/search/jina.py",
+      "app/services/llm_factory.py:37-63",
+      "app/main.py:118-121"
+    ],
+    "proof": "SearchManager создаёт backend instances с httpx clients при каждом search/health check; закрытия всех созданных клиентов нет. В factory Alibaba-клиенты кешируются по секретному ключу без eviction/close, Gemini client также не закрывается в main finally. Закрываются только bot session и DB engine.",
+    "impact": "Накопление незакрытых connection pools/ресурсов, особенно при частом поиске или смене ключей. Точный рост FD под production-нагрузкой не измерялся.",
+    "fix": "Приложение/lifespan должно владеть singleton или bounded cached clients; конфигурация меняется через replace+aclose. Закрывать все созданные backend instances, в том числе неиспользованные при fallback и health check.",
+    "acceptance": "Многократные search/test/key rotation не оставляют открытых клиентов. Shutdown закрывает каждый transport ровно один раз; тесты проверяют counters закрытия и отмену активных запросов."
+  },
+  {
+    "id": "A31",
+    "priority": "P2",
+    "title": "JinaReader реализован, но не подключён к open_url в рабочем пути",
+    "files": [
+      "app/search/jina.py",
+      "app/search/fetcher.py:125-148",
+      "app/llm/tools/registry.py",
+      "app/llm/tools/builtin.py:165-178",
+      "app/services/generation.py:464-471"
+    ],
+    "proof": "fetch_url умеет принимать reader, ToolContext имеет jina_reader, builtin передаёт context.jina_reader. Но создающий ToolContext GenerationService не передаёт reader; default остаётся None. Наличие настроенного Jina Search не создаёт Reader автоматически.",
+    "impact": "Обещанный основной путь Jina Reader фактически не используется; работает только direct HTTP extraction. Unit test с вручную переданным reader не проверяет wiring.",
+    "fix": "Явно внедрить настроенный JinaReader через service factory/ToolContext, разделить search и reader capabilities/ключи/enablement. Сохранить direct fallback и SSRF/bytes checks, не доверять содержимому Reader.",
+    "acceptance": "Через настоящий tool loop open_url использует enabled Reader; сбой/отключение переключает на direct extraction. SSRF проверки не обходятся обоими путями."
+  },
+  {
+    "id": "A32",
+    "priority": "P2",
+    "title": "Источники и AI Overview не доведены до требуемого end-to-end контракта",
+    "files": [
+      "app/config.py:35",
+      "app/services/generation.py:350-382",
+      "app/services/generation.py:197-239",
+      "app/search/manager.py:130-168",
+      "app/search/serpapi_ai_overview.py",
+      "app/llm/tools/builtin.py:131-146"
+    ],
+    "proof": "show_sources=False по умолчанию отключает гарантированное добавление источников в final. Модель может сама сослаться на URL, но обязательность этого не обеспечена. AUTO для вопросительных запросов сначала идёт в AI Overview вместо ordinary search. AIO sections/reference mapping сводятся к тексту и списку, возможен overview без полноценных references; предупреждение модели уже есть, но этого недостаточно для проверки итогового ответа.",
+    "impact": "Ответ после web search может оказаться без проверяемых источников; режим auto расходует/использует сервисы не в порядке, заданном ТЗ. Теряется связь конкретного утверждения AIO с reference.",
+    "fix": "Сохранять структурированные source references до final renderer; гарантировать корректные clickable citations при реально использованном поиске без выдуманных URL. AUTO: обычный поиск первым, AIO по обоснованной необходимости. Overview без references считать неподтверждённым/недоступным.",
+    "acceptance": "Search → tool result → final Telegram во всех tiers содержит реальные источники. AIO sections/references сохраняются, отсутствие references не даёт «подтверждённый ответ». Проверить порядок и bounded fallback, без полного dump результатов."
+  },
+  {
+    "id": "A33",
+    "priority": "P2",
+    "title": "Некорректная структура ответа search backend обрывает fallback",
+    "files": [
+      "app/search/serper.py:50-73",
+      "app/search/brave.py:55-78",
+      "app/search/manager.py:170-192",
+      "app/search/playwright_google.py"
+    ],
+    "proof": "Парсеры предполагают dict у элементов результатов и вызывают .get без полной проверки структуры. Валидный JSON с неверным типом может дать AttributeError/TypeError вместо SearchBackendError; manager ловит только SearchBackendError и не переходит к следующему backend. Для experimental Playwright abort при challenge есть, но полноценный persistent cooldown не реализован.",
+    "impact": "Один изменившийся/повреждённый ответ поискового сервиса делает весь поиск недоступным, несмотря на рабочие fallback backends; optional browser может повторять бесполезные challenge-запросы.",
+    "fix": "Валидировать входящие JSON schemas/типы, переводить ожидаемые protocol errors в единую типизированную ошибку backend. Отдельно управлять cooldown/health; не добавлять CAPTCHA bypass или stealth.",
+    "acceptance": "Fixtures с null/list/string вместо result object, malformed nested fields, 429/5xx/timeout: следующий backend вызывается, возвращается нормализованный результат. Challenge Playwright отключает его на bounded cooldown."
+  },
+  {
+    "id": "A34",
+    "priority": "P1",
+    "title": "После рестарта не восстанавливаются stale runs; pending Telegram updates удаляются",
+    "files": [
+      "app/main.py:110-121",
+      "app/services/generation.py:546-593",
+      "app/db/repositories/generation_runs.py"
+    ],
+    "proof": "В startup нет reconciliation queued/running записей, оставшихся от предыдущего процесса. delete_webhook вызывается с drop_pending_updates=True при каждом старте. Background maintenance tasks создаются без управляемого shutdown/drain; bot и uvicorn объединены gather без явного общего supervisor.",
+    "impact": "Необработанные за время простоя сообщения удаляются; DB содержит вечные running runs; завершение процесса не гарантирует сохранение/закрытие активной генерации и обслуживания памяти. Конкретное поведение signal handlers требует Docker/aiogram integration test.",
+    "fix": "Startup recovery со статусом aborted/failed и освобождением reservations; pending updates по умолчанию сохранять, deliberate discard — отдельный явный режим. Общий lifecycle supervisor: stop intake → cancel/drain generation and maintenance → persist → close providers → DB.",
+    "acceptance": "Kill/restart с активным stream и pending update: run перестаёт быть running, reservation освобождена/сверена, непринятое сообщение не теряется. SIGTERM корректно завершает bot и API, readiness отражает деградацию."
+  },
+  {
+    "id": "A35",
+    "priority": "P2",
+    "title": "Наблюдаемость и аудит админских операций неполны",
+    "files": [
+      "app/api/routes/admin_stats.py",
+      "miniapp/src/admin/AdminDashboardPage.tsx",
+      "miniapp/src/admin/AdminAuditPage.tsx",
+      "app/api/routes/admin_search.py",
+      "app/db/models/generation_run.py",
+      "app/observability/logging.py"
+    ],
+    "proof": "Есть базовые totals/status/token counts и audit table, но нет полного requests/model, latency/TTFT distribution, error rate/429, usage по Gemini project/tool/search backend и полноценной диагностики error runs. Search health checks меняют состояние без полного audit trail. Audit UI показывает только последние 100 записей без фильтра/пагинации; это ограничение UI, не отсутствие самой таблицы.",
+    "impact": "Владелец не может проверить заявленные лимиты/качество, найти проблемный проект или восстановить последовательность административных действий. A06–A09 дополнительно искажают имеющиеся метрики.",
+    "fix": "После исправления ledger добавить per-request/call correlation IDs, latency/TTFT/error metrics, project attempts, tool/search counters; безопасные redacted error details. Все admin mutations и дорогие tests — audit, с pagination/filter и без secret/reasoning payload.",
+    "acceptance": "Контрольные запросы с известным usage/latency/429 видны в нужных разрезах; counters совпадают с ledger. Каждый admin action имеет actor/target/time/result, non-owner не читает чужие логи."
+  },
+  {
+    "id": "A36",
+    "priority": "P1",
+    "title": "Тесты не доказывают важные инварианты и местами закрепляют ошибки ТЗ",
+    "files": [
+      "tests/unit/test_generation.py",
+      "tests/unit/test_context.py",
+      "tests/unit/test_gemini_pool.py",
+      "tests/unit/test_api.py",
+      "tests/unit/test_alibaba_provider.py",
+      "pyproject.toml",
+      "miniapp/package.json"
+    ],
+    "proof": "18 test modules, 290 test-function definitions. 285 доступных parametrized unit cases здесь прошли; четыре модуля не собрались без aiogram. Нет полноценного PostgreSQL/API+bot/frontend integration suite и CI workflow. Тесты специально ожидают unknown-model fallback, dropping historical images, over-budget recent window и break-on-Done. В pool suite нет настоящего barrier/database race test, несмотря на заявления TASKS.",
+    "impact": "Зелёные unit tests подтверждают внутреннюю согласованность отдельных функций, но не работу приложения по ТЗ. Mock fixtures обходят те места, где расходятся repository/service/frontend/provider contracts.",
+    "fix": "Исправлять не только реализацию, но и неверные тестовые ожидания по исходным требованиям. Добавить offline provider-to-consumer contract suite, PostgreSQL transactional tests, frontend E2E и Docker smoke. Live API tests отдельно opt-in, без расхода ключей в обычном CI.",
+    "acceptance": "CI Python 3.12: весь pytest без исключений, Ruff, mypy/pyright; frontend npm ci, tsc, production build, E2E. PostgreSQL fresh+upgrade/race tests реальны, не SQLite вместо PostgreSQL. Приложены команды, exit codes и логи, skip не считается pass."
+  },
+  {
+    "id": "A37",
+    "priority": "P2",
+    "title": "Deployment требует проверки сигналов, readiness и безопасного сетевого профиля",
+    "files": [
+      "Dockerfile",
+      "docker-compose.yml",
+      "Caddyfile",
+      "app/api/app.py:61-63",
+      "app/main.py:118-121",
+      "README.md"
+    ],
+    "proof": "CMD запускает shell с «alembic upgrade head && python ...» без exec; /health всегда возвращает ok без DB/bot readiness; app port публикуется на всех интерфейсах, позволяя обращаться по HTTP в обход Caddy, если не закрыт firewall. Присутствует специфичный для хостера Telegram IP pin. Полный docker compose build/up здесь не выполнен, поэтому проблемы signal forwarding/профилей отмечены как риски, а не доказанный crash.",
+    "impact": "Ложноположительный healthcheck, непрогнозируемое graceful shutdown и лишний публичный HTTP endpoint. Перенос на другую машину наследует специфичную маршрутизацию. Пароли с URL-special characters требуют корректного построения DATABASE_URL.",
+    "fix": "Entry point с exec после миграций, coordinated shutdown, отдельные liveness/readiness. По умолчанию expose только внутри сети Caddy или bind localhost; документировать external reverse proxy. Вынести Telegram IP pin в explicit deployment override. Проверить compose config с/без Caddy profile, quoted/encoded DB credentials и сохранность volume.",
+    "acceptance": "docker compose config/build/up на чистой машине и upgrade существующей DB; miniapp dist отдаётся по HTTPS; SIGTERM сохраняет состояния; readiness падает при потере DB/bot. Выполнен backup+restore test. Никакого самовольного изменения endpoint Gemini/Alibaba."
+  },
+  {
+    "id": "A38",
+    "priority": "P2",
+    "title": "Документация и отметки DONE противоречат коду и собственным probe-отчётам",
+    "files": [
+      "TASKS.md",
+      "KNOWN_ISSUES.md",
+      "DECISIONS.md",
+      "PLAN.md",
+      "README.md",
+      "docs/API.md",
+      "docs/vendor/ALIBABA.md",
+      ".agents/reports/security_review.md",
+      ".agents/reports/probe_20260918_130436.json"
+    ],
+    "proof": "TASKS отмечает milestones готовыми, advisory/race/partial/tool wiring — выполненными, но описанные выше инварианты не обеспечены. KNOWN_ISSUES одновременно говорит о live probe и о том, что probes не выполнялись. Формулировка «все 5 Alibaba models» не подтверждается сохранённым JSON из четырёх моделей; Gemini в обоих JSON skipped. Конец TASKS повторно содержит unchecked memory tasks после DONE. DTL в probe подтверждён, но ADR/backlog остались старые.",
+    "impact": "Следующий агент или владелец принимает устаревшие обещания за выполненную проверку и не тестирует проблемные сценарии.",
+    "fix": "Обновить docs после исправлений и привязать DONE к конкретным commit/artifact/test results. Отдельно хранить исторические probe results и актуальный статус. Не заявлять, что Kimi не проводил исследования: отчёты есть; важно устранить рассогласование результатов и runtime.",
+    "acceptance": "Для каждого audit ID — fix/test/status/evidence. Документация не утверждает live-tested то, что skipped; известные риски явно остаются открытыми, optional features не выдаются за обязательные реализованные."
+  },
+  {
+    "id": "A39",
+    "priority": "P2",
+    "title": "Tool-loop теряет часть assistant turn и недостаточно ограничен по общей работе",
+    "files": [
+      "app/services/generation.py:430-494",
+      "app/services/generation.py:506-544",
+      "app/llm/tools/runner.py",
+      "app/llm/tools/registry.py",
+      "app/llm/base.py"
+    ],
+    "proof": "_assistant_tool_message получает только ToolCall list и не включает текст assistant, пришедший в том же раунде. Следующий provider request не видит уже сказанный им текст. Ограничены iterations и timeout отдельного tool, но нет общего deadline, лимита количества calls в одном batch и общего result/token budget. Сохранение provider-specific reasoning protocol для Alibaba требует отдельного end-to-end подтверждения; факта live incompatibility здесь не установлено. Gemini thought signatures для function calls уже сохраняются — это не отсутствующая функция.",
+    "impact": "Модель может повторять/терять часть собственного ответа, выполнять слишком много инструментов за один turn или выйти за context budget. Важные протокольные проблемы не обнаруживаются тестом, который проверяет только факт первого function call.",
+    "fix": "Сохранять полный нормализованный assistant turn (visible text + calls + необходимые private protocol metadata внутри adapter), не показывая reasoning пользователю. Добавить max calls/round, max calls/run, overall deadline/result budget и явный статус max-iterations. Не отключать Gemini thought signatures при рефакторинге.",
+    "acceptance": "Два и более tool-раунда: следующий payload содержит правильный предыдущий turn и tool results. Текст не повторяется из-за утраты контекста, лимиты batch/deadline выполняются; reasoning отсутствует в Telegram и обычных messages."
+  },
+  {
+    "id": "A40",
+    "priority": "P3",
+    "title": "Рекомендуемое усиление памяти, ограничений входа и воспроизводимости",
+    "files": [
+      "app/db/repositories/memories.py:87-104",
+      "app/db/migrations/versions/0006_memories.py",
+      "app/memory/deduplicator.py",
+      "app/config.py",
+      "pyproject.toml",
+      "miniapp/src/components/Modal.tsx",
+      "miniapp/src/components/Toggle.tsx"
+    ],
+    "proof": "Это отдельный блок улучшений, не заявление о доказанной эксплуатации. FTS строит to_tsvector на чтении без соответствующего GIN index и ранжирует в основном importance/last_used; dedup не имеет DB unique fingerprint для конкурентных вставок. Backend dependencies не имеют полного lockfile; runtime numeric/URL settings требуют более строгой валидации. UI modal/toggles нуждаются в проверке focus/labels и Telegram mobile ergonomics.",
+    "impact": "С ростом памяти возможны медленные запросы/дубликаты, окружения хуже воспроизводятся, ошибки конфигурации обнаруживаются поздно. Доступность интерфейса для клавиатуры/скринридера ограничена.",
+    "fix": "GIN/FTS ranking и bounded dedup candidates после измерения EXPLAIN; атомарный user-scoped fingerprint для exact dedup. Зафиксировать backend dependencies/образа и добавить dependency scanning без неподтверждённых CVE-обвинений. Ограничить длины input/schema/tool args, проверить URL/числовые ranges, ввести accessibility smoke tests и backup retention policy.",
+    "acceptance": "Планы запросов и latency на реалистичном объёме, concurrent memory inserts без exact duplicates, чистая установка одинаковых версий, отрицательные config tests, keyboard/focus/screen-reader smoke. Эти улучшения не должны задерживать исправление P1."
+  }
+]

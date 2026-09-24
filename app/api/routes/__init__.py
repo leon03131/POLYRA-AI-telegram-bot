@@ -3,6 +3,8 @@
 from app.api.routes import (
     admin_access,
     admin_gemini,
+    admin_memory,
+    admin_models,
     admin_providers,
     admin_search,
     admin_stats,
@@ -18,6 +20,8 @@ from app.api.routes import (
 __all__ = [
     "admin_access",
     "admin_gemini",
+    "admin_memory",
+    "admin_models",
     "admin_providers",
     "admin_search",
     "admin_stats",

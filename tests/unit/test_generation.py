@@ -30,6 +30,7 @@ from app.llm.gemini.pool import PoolExhaustedError
 from app.llm.registry import default_registry
 from app.llm.tools.registry import ToolDefinition, ToolRegistry
 from app.llm.tools.runner import ToolExecution, ToolRunner
+from app.llm.tools.schemas import make_llm_tools
 from app.services.access import evaluate_access
 from app.services.generation import (
     ActiveGeneration,
@@ -467,11 +468,12 @@ async def test_stream_loop_executes_tool_calls_and_continues() -> None:
     service._llm_stream = fake_stream
     runner = ToolRunner(registry, session_factory=None)
     streamer = FakeStreamer()
+    echo_llm_tools = make_llm_tools(registry.list_enabled(_permissions_stub()))
 
     result = await service._stream_loop(
         _prepared_stub(),
         streamer,
-        llm_tools=None,
+        llm_tools=echo_llm_tools,
         tool_runner=runner,
         user=SimpleNamespace(id=uuid.uuid4()),
         permissions=_permissions_stub(),
@@ -479,7 +481,7 @@ async def test_stream_loop_executes_tool_calls_and_continues() -> None:
     )
 
     assert result is not None
-    outcome, tool_records = result
+    outcome, _records = result[0], result[1]
     assert outcome.text == "готово"
     assert outcome.cancelled is False
     assert outcome.tool_calls_count == 1
@@ -514,11 +516,12 @@ async def test_stream_loop_respects_max_iterations() -> None:
         generation_registry=GenerationRegistry(),
     )
     runner = ToolRunner(registry, session_factory=None)
+    echo_llm_tools = make_llm_tools(registry.list_enabled(_permissions_stub()))
 
     result = await service._stream_loop(
         _prepared_stub(),
         FakeStreamer(),
-        llm_tools=None,
+        llm_tools=echo_llm_tools,
         tool_runner=runner,
         user=SimpleNamespace(id=uuid.uuid4()),
         permissions=_permissions_stub(),
@@ -526,9 +529,10 @@ async def test_stream_loop_respects_max_iterations() -> None:
     )
 
     assert result is not None
-    outcome, tool_records = result
+    outcome, tool_records = result[0], result[1]
     assert len(tool_records) == 2  # ровно max_tool_iterations исполнений
     assert outcome.cancelled is False
+
 
 async def test_stream_loop_runs_tools_when_finish_stop_but_calls_present() -> None:
     """Gemini-стиль: finish_reason='stop' + ToolCall в потоке → tools исполняются."""
@@ -562,11 +566,12 @@ async def test_stream_loop_runs_tools_when_finish_stop_but_calls_present() -> No
     service = _service()
     service._llm_stream = fake_stream
     runner = ToolRunner(registry, session_factory=None)
+    echo_llm_tools = make_llm_tools(registry.list_enabled(_permissions_stub()))
 
     result = await service._stream_loop(
         _prepared_stub(),
         FakeStreamer(),
-        llm_tools=None,
+        llm_tools=echo_llm_tools,
         tool_runner=runner,
         user=SimpleNamespace(id=uuid.uuid4()),
         permissions=_permissions_stub(),
@@ -574,7 +579,7 @@ async def test_stream_loop_runs_tools_when_finish_stop_but_calls_present() -> No
     )
 
     assert result is not None
-    outcome, tool_records = result
+    outcome, tool_records = result[0], result[1]
     assert len(tool_records) == 1  # tool исполнен несмотря на finish_reason=stop
     assert outcome.text == "ответ"
     assert len(calls) == 2  # второй раунд с результатом инструмента
@@ -595,6 +600,6 @@ async def test_stream_loop_empty_final_text_gives_no_crash() -> None:
         cancellation=asyncio.Event(),
     )
     assert result is not None
-    outcome, tool_records = result
+    outcome, tool_records = result[0], result[1]
     assert outcome.text == ""
     assert tool_records == []

@@ -3,7 +3,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, Uuid
+from sqlalchemy import text as sa_text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -33,3 +34,14 @@ class Memory(TimestampMixin, Base):
     source_chat_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     source_message_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     embedding: Mapped[list[float] | None] = mapped_column(JSONB)
+
+    __table_args__ = (
+        # GIN FTS-индекс для MemoryRepository.search_fts (конфиг simple).
+        # Текстовая SQL-форма: func.to_tsvector('simple', ...) не рендерится
+        # в DDL (literal REGCONFIG) — см. миграцию 0009.
+        Index(
+            "ix_memories_text_fts",
+            sa_text("to_tsvector('simple', text)"),
+            postgresql_using="gin",
+        ),
+    )

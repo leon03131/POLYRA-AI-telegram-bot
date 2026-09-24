@@ -47,10 +47,15 @@ async def resolve_ips(hostname: str) -> list[IPAddress]:
     return sorted(ips, key=str)
 
 
-async def assert_url_public(url: str, *, resolver: Resolver | None = None) -> str:
-    """Проверить URL: только http/https + каждый resolved IP глобальный. Возвращает url.
+async def validate_url_public_ips(
+    url: str, *, resolver: Resolver | None = None
+) -> tuple[str, list[IPAddress]]:
+    """Проверить URL и вернуть (hostname, проверенные публичные IP) для pinned connect.
 
-    Порт нестандартный разрешён; схема — строго. resolver инъектируется для тестов.
+    Только http/https; каждый resolved IP глобальный. Порт нестандартный разрешён.
+    Возвращённые IP — единственные разрешённые цели connect (anti DNS-rebinding):
+    caller ОБЯЗАН подключаться к ним, а не перезапрашивать DNS.
+    resolver инъектируется для тестов.
     """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
@@ -68,4 +73,13 @@ async def assert_url_public(url: str, *, resolver: Resolver | None = None) -> st
         raise SSRFError(f"cannot resolve {hostname!r}")
     for ip in ips:
         _assert_ip_public(ip, hostname)
+    return hostname, ips
+
+
+async def assert_url_public(url: str, *, resolver: Resolver | None = None) -> str:
+    """Проверить URL: только http/https + каждый resolved IP глобальный. Возвращает url.
+
+    Порт нестандартный разрешён; схема — строго. resolver инъектируется для тестов.
+    """
+    await validate_url_public_ips(url, resolver=resolver)
     return url

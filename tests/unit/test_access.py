@@ -324,3 +324,53 @@ def test_real_now_does_not_break_permanent_grant() -> None:
         now=datetime.now(UTC),
     )
     assert perms.allowed is True
+
+
+# --- семантика пустого allowlist vs unrestricted (A03, FIX V2) -----------------
+
+
+def test_empty_frozenset_denies_every_model() -> None:
+    """Пустой allowlist = запрет всех моделей; пустой frozenset НЕ равен None."""
+    grant = _grant()
+    perms = evaluate_access(
+        is_owner=False,
+        user_status="active",
+        grant=grant,
+        allowed_models=frozenset(),
+        now=NOW,
+    )
+    assert perms.allowed is True  # доступ к боту есть, но моделей нет
+    assert perms.allowed_models is not None
+    assert perms.allowed_models == frozenset()
+    for model_id in ("gemini-3.8-flash", "qwen3.8-flash", "kimi-k3", "any-model"):
+        assert is_model_allowed(perms, model_id) is False
+
+
+def test_none_allowed_models_allows_any_model() -> None:
+    """None = unrestricted: любая model_id разрешена (включая неизвестные)."""
+    grant = _grant()
+    perms = evaluate_access(
+        is_owner=False,
+        user_status="active",
+        grant=grant,
+        allowed_models=None,
+        now=NOW,
+    )
+    assert perms.allowed_models is None
+    for model_id in ("gemini-3.8-flash", "qwen3.8-flash", "unknown-model"):
+        assert is_model_allowed(perms, model_id) is True
+
+
+def test_owner_always_allowed_even_with_empty_allowlist_input() -> None:
+    """Owner unrestricted всегда: allowed_models=None независимо от входа."""
+    perms = evaluate_access(
+        is_owner=True,
+        user_status="active",
+        grant=None,
+        allowed_models=frozenset(),  # даже «пустой список» извне не влияет
+        now=NOW,
+    )
+    assert perms.allowed is True
+    assert perms.allowed_models is None
+    for model_id in ("gemini-3.8-flash", "unknown-model"):
+        assert is_model_allowed(perms, model_id) is True

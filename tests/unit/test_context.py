@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from types import SimpleNamespace
 
 from app.context import (
@@ -65,11 +66,26 @@ def test_estimate_message_text_and_image_parts() -> None:
     assert manager.estimate_message({"role": "user", "parts": []}) == 1  # минимум 1
 
 
+def test_estimate_current_text_and_image() -> None:
+    manager = TokenBudgetManager(chars_per_token=1.0, image_tokens=1032)
+    assert manager.estimate_current(None) == 0
+    assert manager.estimate_current([]) == 0
+    assert manager.estimate_current([{"type": "text", "text": "abc"}]) == 3
+    # image в current — фиксированная цена, как и в истории
+    assert manager.estimate_current([{"type": "image", "mime_type": "image/jpeg"}]) == 1032
+    parts = [{"type": "image"}, {"type": "text", "text": "ab"}]
+    assert manager.estimate_current(parts) == 1032 + 2
+
+
 # --- ContextBuilder --------------------------------------------------------------
 
 
 def _msg(role: str, text: str) -> SimpleNamespace:
-    return SimpleNamespace(role=role, parts=[SimpleNamespace(type="text", text=text)])
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        role=role,
+        parts=[SimpleNamespace(type="text", text=text)],
+    )
 
 
 def _model(max_context: int) -> ModelDefinition:
@@ -162,10 +178,12 @@ def test_builder_with_summary_uses_recent_only() -> None:
         summary_json=summary,
         memories=[],
         history=history,
+        covered_until_message_id=history[3].id,  # older (0..3) покрыты сводкой
     )
-    assert len(built.messages) == 2  # только recent, older покрыты сводкой
+    assert len(built.messages) == 2  # только recent, покрытое не дублируется
     assert built.dropped_oldest == 0
     assert built.needs_compaction is False
+    assert built.fits is True
     assert "## Сводка предыдущего разговора" in built.system_prompt
     assert "короткая сводка" in built.system_prompt
     assert "- факт" in built.system_prompt
@@ -180,6 +198,7 @@ def test_builder_with_summary_budget_pressure_needs_compaction() -> None:
         summary_json=summary,
         memories=[],
         history=history,
+        covered_until_message_id=history[3].id,
     )
     assert built.messages  # recent сохранены
     assert built.needs_compaction is True
@@ -200,9 +219,11 @@ def test_builder_renders_memories_block() -> None:
     assert built.system_prompt.startswith("база")
 
 
-def test_builder_skips_image_only_messages_and_has_no_current() -> None:
+def test_builder_image_part_without_bytes_becomes_placeholder() -> None:
+    # Image-part БЕЗ bytes не выбрасывается молча — текстовый плейсхолдер (A18).
     history = [
         SimpleNamespace(
+            id=uuid.uuid4(),
             role="user",
             parts=[SimpleNamespace(type="image", text=None, mime_type="image/jpeg")],
         ),
@@ -215,5 +236,207 @@ def test_builder_skips_image_only_messages_and_has_no_current() -> None:
         memories=[],
         history=history,
     )
-    # image-only выпало; current-сообщения в builder не передаётся и не появляется.
-    assert built.messages == [{"role": "user", "parts": [{"type": "text", "text": "подпись"}]}]
+    # current-сообщения в builder не передаётся и не появляется.
+    assert built.messages == [
+        {"role": "user", "parts": [{"type": "text", "text": "[изображение]"}]},
+        {"role": "user", "parts": [{"type": "text", "text": "подпись"}]},
+    ]
+
+
+def test_builder_image_part_with_bytes_kept_as_image() -> None:
+    # Image-part С bytes (data_base64) проходит как image — модель видит фото (A18).
+    history = [
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            role="user",
+            parts=[
+                SimpleNamespace(
+                    type="image", text=None, mime_type="image/jpeg", data_base64="QUJD"
+                ),
+                SimpleNamespace(type="text", text="что на фото?"),
+            ],
+        ),
+    ]
+    built = _builder(keep_recent=10).build(
+        model=_model(1000),
+        base_system_prompt="",
+        summary_json=None,
+        memories=[],
+        history=history,
+    )
+    assert built.messages == [
+        {
+            "role": "user",
+            "parts": [
+                {"type": "image", "data_base64": "QUJD", "mime_type": "image/jpeg"},
+                {"type": "text", "text": "что на фото?"},
+            ],
+        }
+    ]
+
+
+# --- A15: покрытие истории ----------------------------------------------------
+
+
+def test_builder_uncovered_segment_included_with_summary() -> None:
+    # 30 сообщений, сводка покрывает первые 10 → 20 непокрытых: все влезают.
+    history = [_msg("user", f"m{i}") for i in range(30)]
+    built = _builder(keep_recent=10).build(
+        model=_model(100_000),
+        base_system_prompt="",
+        summary_json={"conversation_summary": "старая сводка"},
+        memories=[],
+        history=history,
+        covered_until_message_id=history[9].id,
+    )
+    assert len(built.messages) == 20  # весь непокрытый сегмент, не только recent
+    assert built.messages[0]["parts"][0]["text"] == "m10"  # boundary строго после m9
+    assert built.messages[-1]["parts"][0]["text"] == "m29"
+    assert built.dropped_oldest == 0
+    # есть непокрытый материал за пределами recent → compaction (даже если всё влезло)
+    assert built.needs_compaction is True
+    assert built.fits is True
+
+
+def test_builder_boundary_strictly_at_covered_until() -> None:
+    # covered_until внутри recent-окна: включать только сообщения ПОСЛЕ него.
+    history = [_msg("user", f"m{i}") for i in range(10)]
+    built = _builder(keep_recent=10).build(
+        model=_model(100_000),
+        base_system_prompt="",
+        summary_json={"conversation_summary": "s"},
+        memories=[],
+        history=history,
+        covered_until_message_id=history[7].id,
+    )
+    assert [m["parts"][0]["text"] for m in built.messages] == ["m8", "m9"]
+    assert built.dropped_oldest == 0
+    assert built.needs_compaction is False  # непокрытого за пределами recent нет
+
+
+def test_builder_uncovered_dropped_oldest_by_budget() -> None:
+    # threshold = 0.7*100 = 70; system ≈ 40 (рендер сводки) + recent 2×20 = 40.
+    # Непокрытые older по 20: первый 40+40+20 = ~100 > 70 → не влезает никто.
+    history = [_msg("user", "x" * 20) for _ in range(6)]
+    built = _builder(keep_recent=2).build(
+        model=_model(10_000),  # большой бюджет: всё влезает
+        base_system_prompt="",
+        summary_json={"conversation_summary": "s"},
+        memories=[],
+        history=history,
+        covered_until_message_id=history[0].id,  # покрыто ровно 1 → 5 непокрытых
+    )
+    assert len(built.messages) == 5
+    assert built.dropped_oldest == 0
+    assert built.needs_compaction is True
+
+    tight = _builder(keep_recent=2).build(
+        model=_model(100),  # threshold = 70: older не влезают
+        base_system_prompt="",
+        summary_json={"conversation_summary": "s"},
+        memories=[],
+        history=history,
+        covered_until_message_id=history[0].id,
+    )
+    assert len(tight.messages) == 2  # только recent
+    assert tight.dropped_oldest == 3  # непокрытые older отброшены
+    assert tight.needs_compaction is True
+
+
+def test_builder_unknown_covered_id_treats_all_as_uncovered() -> None:
+    # covered_until не найден в выборке (старше окна) → вся выборка непокрыта.
+    history = [_msg("user", f"m{i}") for i in range(15)]
+    built = _builder(keep_recent=10).build(
+        model=_model(100_000),
+        base_system_prompt="",
+        summary_json={"conversation_summary": "s"},
+        memories=[],
+        history=history,
+        covered_until_message_id=uuid.uuid4(),
+    )
+    assert len(built.messages) == 15
+    assert built.messages[0]["parts"][0]["text"] == "m0"
+    assert built.needs_compaction is True
+
+
+# --- A16: полный бюджет ---------------------------------------------------------
+
+
+def test_builder_current_and_tools_counted_in_budget() -> None:
+    history = [_msg("user", "x" * 20) for _ in range(6)]
+    base = _builder(keep_recent=2).build(
+        model=_model(100),  # threshold = 70; system=1 + recent 40 = 41
+        base_system_prompt="",
+        summary_json=None,
+        memories=[],
+        history=history,
+    )
+    assert len(base.messages) == 3  # один older влезает (41+20=61 ≤ 70)
+    assert base.dropped_oldest == 3
+
+    with_extras = _builder(keep_recent=2).build(
+        model=_model(100),
+        base_system_prompt="",
+        summary_json=None,
+        memories=[],
+        history=history,
+        current_parts=[{"type": "text", "text": "y" * 20}],  # +20
+        tools_token_estimate=20,  # +20 → used = 81 > 70
+    )
+    assert len(with_extras.messages) == 2  # older больше не влезают
+    assert with_extras.dropped_oldest == 4
+    assert with_extras.needs_compaction is True
+
+
+def test_builder_current_image_counted_in_budget() -> None:
+    # image в current = 1032 токена — само по себе больше маленького бюджета.
+    built = _builder(keep_recent=2).build(
+        model=_model(1000),
+        base_system_prompt="",
+        summary_json=None,
+        memories=[],
+        history=[_msg("user", "привет")],
+        current_parts=[{"type": "image", "mime_type": "image/jpeg"}],
+    )
+    assert built.fits is False  # 1 + 6 + 1032 > 1000
+    assert built.messages  # recent не отброшены
+
+
+def test_builder_fits_false_when_minimum_exceeds_available() -> None:
+    # Даже system + recent не влезают в available → fits=False (lead решит отказ).
+    history = [_msg("user", "x" * 100) for _ in range(2)]
+    built = _builder(keep_recent=2).build(
+        model=_model(100),
+        base_system_prompt="",
+        summary_json=None,
+        memories=[],
+        history=history,
+    )
+    assert built.fits is False
+    assert len(built.messages) == 2  # recent священны — не режем
+
+
+def test_builder_propagates_max_output_tokens() -> None:
+    # Явный max_output_tokens → резервируется и возвращается в BuiltContext.
+    built = _builder(keep_recent=2).build(
+        model=_model(1000),
+        base_system_prompt="",
+        summary_json=None,
+        memories=[],
+        history=[],
+        max_output_tokens=1234,
+    )
+    assert built.max_output_tokens == 1234
+
+    # Без явного — дефолтный reserved_output менеджера.
+    manager = TokenBudgetManager(chars_per_token=1.0, reserved_output=4096, safety_margin=512)
+    builder = ContextBuilder(manager, keep_recent=2)
+    default_built = builder.build(
+        model=_model(100_000),
+        base_system_prompt="",
+        summary_json=None,
+        memories=[],
+        history=[],
+    )
+    assert default_built.max_output_tokens == 4096
+    assert default_built.fits is True

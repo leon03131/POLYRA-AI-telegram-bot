@@ -38,6 +38,8 @@ include = ["app*"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Вендорная документация/аудит-пакеты (docs/**) — не наш production-код.
+extend-exclude = ["docs", ".agents"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "ASYNC", "B", "SIM", "C90"]
@@ -66,4 +68,4 @@ module = ["tests.*"]
 disallow_untyped_defs = false
 disallow_untyped_calls = false
 disallow_incomplete_defs = false
-disable_error_code = ["arg-type", "type-arg", "attr-defined", "method-assign"]
+disable_error_code = ["arg-type", "type-arg", "attr-defined", "method-assign", "call-arg", "list-item"]

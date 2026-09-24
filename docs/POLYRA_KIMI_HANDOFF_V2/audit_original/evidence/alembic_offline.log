@@ -1,0 +1,11 @@
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Generating static SQL
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 0001, initial schema: users, access_grants, user_model_permissions, user_settings
+INFO  [alembic.runtime.migration] Running upgrade 0001 -> 0002, chat core: chats, messages, message_parts, generation_runs
+INFO  [alembic.runtime.migration] Running upgrade 0002 -> 0003, gemini pool: gemini_projects, quota_policies, quota_minute_usage, quota_daily_usage
+INFO  [alembic.runtime.migration] Running upgrade 0003 -> 0004, provider credentials + начальные quota policies для Gemini-моделей
+INFO  [alembic.runtime.migration] Running upgrade 0004 -> 0005, chat summaries (compaction state)
+INFO  [alembic.runtime.migration] Running upgrade 0005 -> 0006, memories (long-term user memory)
+INFO  [alembic.runtime.migration] Running upgrade 0006 -> 0007, search tools: search_backend_configs + tool_calls
+INFO  [alembic.runtime.migration] Running upgrade 0007 -> 0008, system settings + audit log

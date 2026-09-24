@@ -5,11 +5,14 @@ Wire: GET https://api.search.brave.com/res/v1/web/search, X-Subscription-Token.
 Vendor: docs/vendor/SEARCH_BACKENDS.md §3.
 """
 
+from typing import Any
+
 import httpx
 
 from app.search.base import (
     SEARCH_TIMEOUT,
     BackendUnavailableError,
+    SearchBackendError,
     SearchOptions,
     SearchResult,
     hostname_of,
@@ -57,22 +60,46 @@ class BraveSearchBackend:
                 "search_lang": options.language,
             },
         )
-        payload = parse_json(response, self.backend_id)
-        web = payload.get("web") if isinstance(payload, dict) else None
-        items = (web or {}).get("results") or []
+        items = self._result_items(parse_json(response, self.backend_id))
         results: list[SearchResult] = []
         for item in items[: options.max_results]:
-            url = item.get("url")
-            if not url:
+            if not isinstance(item, dict):
                 continue
-            profile = item.get("profile") or {}
+            url = item.get("url")
+            if not isinstance(url, str) or not url:
+                continue
+            profile = item.get("profile")
+            if not isinstance(profile, dict):
+                profile = {}
+            title = item.get("title")
+            description = item.get("description")
+            page_age = item.get("page_age")
+            profile_name = profile.get("name")
+            if not isinstance(profile_name, str) or not profile_name:
+                profile_name = hostname_of(url)
             results.append(
                 SearchResult(
-                    title=item.get("title") or "",
+                    title=title if isinstance(title, str) else "",
                     url=url,
-                    snippet=strip_html(item.get("description") or ""),
-                    source=profile.get("name") or hostname_of(url),
-                    published_at=item.get("page_age"),
+                    snippet=strip_html(description if isinstance(description, str) else ""),
+                    source=profile_name,
+                    published_at=page_age if isinstance(page_age, str) else None,
                 )
             )
         return results
+
+    def _result_items(self, payload: object) -> list[Any]:
+        """payload.web.results с проверкой типов; невалидная структура → SearchBackendError."""
+        if not isinstance(payload, dict):
+            raise SearchBackendError(f"{self.backend_id}: unexpected payload (not an object)")
+        web = payload.get("web")
+        if web is None:
+            return []
+        if not isinstance(web, dict):
+            raise SearchBackendError(f"{self.backend_id}: unexpected 'web' (not an object)")
+        raw_items = web.get("results")
+        if raw_items is None:
+            return []
+        if not isinstance(raw_items, list):
+            raise SearchBackendError(f"{self.backend_id}: unexpected 'web.results' (not a list)")
+        return raw_items

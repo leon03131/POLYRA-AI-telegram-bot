@@ -1,0 +1,73 @@
+{
+  "gemini_done_skips_reconcile": {
+    "health_success_calls": 0,
+    "token_reconcile_calls": 0,
+    "reproduced": true
+  },
+  "alibaba_trailer_usage_lost": {
+    "consumer_events": [
+      "TextDelta",
+      "Done"
+    ],
+    "fully_drained_events": [
+      "TextDelta",
+      "Done",
+      "Usage"
+    ],
+    "reproduced": true
+  },
+  "quota_check_reserve_race": {
+    "limit": 1,
+    "accepted": [
+      true,
+      true
+    ],
+    "reservations": 2,
+    "reproduced": true
+  },
+  "quota_reconcile_wrong_window": {
+    "original_window": {
+      "requests": 1,
+      "tokens_in": 0
+    },
+    "finish_window": {
+      "requests": 0,
+      "tokens_in": 123
+    },
+    "reproduced": true
+  },
+  "empty_permissions_mean_unrestricted": {
+    "no_permission_rows_returns": null,
+    "arbitrary_model_allowed": true,
+    "reproduced": true
+  },
+  "photo_persistence_has_no_reference": {
+    "telegram_file_id": null,
+    "metadata": null,
+    "reproduced": true
+  },
+  "summary_discards_uncovered_messages": {
+    "input_messages": 20,
+    "output_messages": 10,
+    "needs_compaction": false,
+    "dropped_oldest_reported": 0,
+    "reproduced": true
+  },
+  "recent_messages_exceed_budget": {
+    "available_tokens": 80,
+    "sent_tokens_estimate": 1000,
+    "needs_compaction": false,
+    "reproduced": true
+  },
+  "empty_summary_is_accepted_by_normalizer": {
+    "normalized_empty_object": {
+      "conversation_summary": "",
+      "important_facts": [],
+      "decisions": [],
+      "open_threads": [],
+      "user_preferences": [],
+      "entities": []
+    },
+    "reproduced": true
+  }
+}

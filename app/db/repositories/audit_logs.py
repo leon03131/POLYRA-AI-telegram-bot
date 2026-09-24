@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AuditLog
@@ -40,3 +40,22 @@ class AuditLogRepository:
         stmt = select(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list(
+        self, *, limit: int = 50, offset: int = 0, action: str | None = None
+    ) -> list[AuditLog]:
+        """Записи (свежие первыми) с пагинацией и опциональным фильтром action."""
+        stmt = select(AuditLog)
+        if action is not None:
+            stmt = stmt.where(AuditLog.action == action)
+        stmt = stmt.order_by(AuditLog.created_at.desc()).limit(limit).offset(offset)
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def count(self, *, action: str | None = None) -> int:
+        """Число записей (с опциональным фильтром action) — для пагинации."""
+        stmt = select(func.count()).select_from(AuditLog)
+        if action is not None:
+            stmt = stmt.where(AuditLog.action == action)
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())

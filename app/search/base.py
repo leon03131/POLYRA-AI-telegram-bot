@@ -66,13 +66,16 @@ class BackendUnavailableError(SearchBackendError):
 
 
 class SearchBackend(Protocol):
-    """Контракт поискового бэкенда."""
+    """Контракт поискового бэкенда. aclose — lifecycle (A30): вызывается менеджером
+    при shutdown и при смене конфига/ключа бэкенда."""
 
     backend_id: str
 
     async def search(self, query: str, options: SearchOptions) -> list[SearchResult]: ...
 
     def is_configured(self) -> bool: ...
+
+    async def aclose(self) -> None: ...
 
 
 @runtime_checkable

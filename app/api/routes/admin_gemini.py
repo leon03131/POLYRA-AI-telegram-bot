@@ -1,6 +1,11 @@
-"""Admin: пул Gemini-проектов (ключи) и политики квот. Полные ключи не возвращаются."""
+"""Admin: пул Gemini-проектов (ключи), политики квот, smoke и счётчики.
+
+Полные ключи не возвращаются. Smoke — реальный дешёвый вызов
+gemini-3.5-flash-lite (≤16 output tokens) напрямую через GeminiProvider.
+"""
 
 import re
+import time
 import uuid
 from typing import Any
 
@@ -9,13 +14,26 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import OwnerDep, SessionDep, require_owner
+from app.config import Settings
 from app.db.models import GeminiProject, QuotaPolicy
-from app.db.repositories import GeminiProjectRepository, QuotaPolicyRepository
+from app.db.repositories import (
+    GeminiProjectRepository,
+    QuotaPolicyRepository,
+    QuotaUsageRepository,
+)
+from app.llm.base import LLMRequest
+from app.llm.providers.gemini import GeminiProvider
 from app.llm.registry import ModelRegistry
 from app.security.crypto import CryptoBox
 from app.services import admin as admin_service
 
 router = APIRouter(prefix="/admin/gemini", dependencies=[Depends(require_owner)])
+
+# Smoke: internal lite-модель, минимальный thinking, ≤16 output tokens (дешевле некуда).
+_SMOKE_MODEL = "gemini-3.5-flash-lite"
+_SMOKE_THINKING = "minimal"
+_SMOKE_MAX_OUTPUT_TOKENS = 16
+_USAGE_LIMIT = 50
 
 
 class GeminiProjectCreateRequest(BaseModel):
@@ -71,6 +89,32 @@ async def _get_project_or_404(session: AsyncSession, project_id: uuid.UUID) -> G
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
     return project
+
+
+async def _run_gemini_smoke(*, api_key: str, base_url: str) -> tuple[bool, int, str | None]:
+    """Дешёвый реальный вызов Gemini (≤16 output tokens) → (ok, latency_ms, error).
+
+    httpx-клиент создаётся и закрывается на время ручного admin-вызова
+    (не путь генерации; singleton-инвариант A30 на него не распространяется).
+    """
+    provider = GeminiProvider(base_url=base_url)
+    started = time.monotonic()
+    error: str | None = None
+    try:
+        request = LLMRequest(
+            model=_SMOKE_MODEL,
+            messages=[{"role": "user", "parts": [{"type": "text", "text": "ping"}]}],
+            thinking=_SMOKE_THINKING,
+            max_output_tokens=_SMOKE_MAX_OUTPUT_TOKENS,
+            metadata={"api_key": api_key},
+        )
+        async for _event in provider.stream_chat(request):
+            pass
+    except Exception as exc:  # noqa: BLE001 — smoke отражает любую ошибку в error
+        error = f"{type(exc).__name__}: {exc}"[:256]
+    finally:
+        await provider.aclose()
+    return (error is None, int((time.monotonic() - started) * 1000), error)
 
 
 @router.get("/projects")
@@ -268,3 +312,53 @@ async def put_quota(
     )
     await session.commit()
     return {"ok": True}
+
+
+@router.post("/projects/{project_id}/test")
+async def test_project(
+    project_id: uuid.UUID, request: Request, current: OwnerDep, session: SessionDep
+) -> dict[str, Any]:
+    """Живой smoke проекта: дешёвый вызов gemini-3.5-flash-lite (≤16 output tokens)."""
+    actor, _ = current
+    settings: Settings = request.app.state.settings
+    crypto: CryptoBox = request.app.state.crypto
+    project = await _get_project_or_404(session, project_id)
+    api_key = crypto.decrypt(project.encrypted_api_key)
+    ok, latency_ms, error = await _run_gemini_smoke(
+        api_key=api_key, base_url=settings.gemini_base_url
+    )
+    await admin_service.audit(
+        session,
+        actor_id=actor.telegram_user_id,
+        action=admin_service.GEMINI_PROJECT_TESTED,
+        target_type="gemini_project",
+        target_id=str(project_id),
+        metadata={"name": project.name, "ok": ok, "latency_ms": latency_ms, "error": error},
+    )
+    await session.commit()
+    return {"ok": ok, "latency_ms": latency_ms, "error": error}
+
+
+@router.post("/reset-counters")
+async def reset_counters(current: OwnerDep, session: SessionDep) -> dict[str, Any]:
+    """Обнулить локальные счётчики квот (quota_minute_usage/quota_daily_usage)."""
+    actor, _ = current
+    minute_deleted, daily_deleted = await QuotaUsageRepository(session).delete_all()
+    await admin_service.audit(
+        session,
+        actor_id=actor.telegram_user_id,
+        action=admin_service.GEMINI_COUNTERS_RESET,
+        target_type="quota_usage",
+        metadata={"minute_deleted": minute_deleted, "daily_deleted": daily_deleted},
+    )
+    await session.commit()
+    return {"ok": True, "deleted": minute_deleted + daily_deleted}
+
+
+@router.get("/usage")
+async def get_usage(current: OwnerDep, session: SessionDep) -> dict[str, Any]:
+    """Фактические счётчики квот: последние 50 минутных и дневных окон."""
+    repo = QuotaUsageRepository(session)
+    minute = await repo.list_recent_minute(limit=_USAGE_LIMIT)
+    daily = await repo.list_recent_daily(limit=_USAGE_LIMIT)
+    return {"minute": minute, "daily": daily}

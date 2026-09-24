@@ -1,0 +1,53 @@
+[
+  {
+    "id": "S1",
+    "title": "OpenCode — Agents (documentation branch /docs)",
+    "url": "https://opencode.ai/docs/agents/",
+    "checked": "2026-09-24",
+    "supports": "Project Markdown subagents in .opencode/agents; mode: subagent; absent model inherits the invoking primary model; legacy task/permission.task configuration."
+  },
+  {
+    "id": "S2",
+    "title": "OpenCode — Agents (documentation branch /v2/docs)",
+    "url": "https://opencode.ai/v2/docs/agents",
+    "checked": "2026-09-24",
+    "supports": "Project Markdown subagents; v2 subagent action and ordered permissions rules; child permissions are configured separately."
+  },
+  {
+    "id": "S3",
+    "title": "OpenCode — Config",
+    "url": "https://opencode.ai/docs/config/",
+    "checked": "2026-09-24",
+    "supports": "JSON/JSONC; configuration merging and priority. This does not identify the user's installed Desktop/runtime version."
+  },
+  {
+    "id": "S4",
+    "title": "OpenCode — official product page",
+    "url": "https://opencode.ai/",
+    "checked": "2026-09-24",
+    "supports": "Desktop interface and multiple parallel sessions are documented; this does not prove this user's permissions or active tools."
+  },
+  {
+    "id": "S5",
+    "title": "Alibaba Cloud Model Studio — deepseek-v4-pro",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/deepseek-v4-pro",
+    "checked": "2026-09-24",
+    "page_updated": "2026-09-20",
+    "supports": "Exact model ID, text modality, China-region function calling and structured outputs; listed context window 1000000 and output maximum 393216."
+  },
+  {
+    "id": "S6",
+    "title": "Alibaba Cloud Model Studio — OpenAI compatible Chat",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions",
+    "checked": "2026-09-24",
+    "supports": "For unsuffixed deepseek-v4-pro: high/max, low and medium mapped to high. Snapshot deepseek-v4-pro-0813 has a different effort description. enable_thinking, max_completion_tokens, and SDK/raw HTTP placement."
+  },
+  {
+    "id": "S7",
+    "title": "Alibaba Cloud Model Studio — Deep thinking",
+    "url": "https://www.alibabacloud.com/help/en/model-studio/deep-thinking",
+    "checked": "2026-09-24",
+    "page_updated": "2026-09-22",
+    "supports": "DeepSeek V4 listed as hybrid thinking, enabled by default. reasoning_content and content are separate; example stream has usage after finish and before [DONE]."
+  }
+]

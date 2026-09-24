@@ -29,6 +29,24 @@ class MemoryRepository:
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    async def count_for_user(self, user_id: uuid.UUID) -> int:
+        """Число записей памяти пользователя (для пагинации)."""
+        stmt = select(func.count()).select_from(Memory).where(Memory.user_id == user_id)
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())
+
+    async def list_all(self, *, limit: int = 50, offset: int = 0) -> list[Memory]:
+        """Admin: память всех пользователей (свежие обновления первыми)."""
+        stmt = select(Memory).order_by(Memory.updated_at.desc()).limit(limit).offset(offset)
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def count_all(self) -> int:
+        """Admin: всего записей памяти (для пагинации)."""
+        stmt = select(func.count()).select_from(Memory)
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())
+
     async def add(
         self,
         user_id: uuid.UUID,

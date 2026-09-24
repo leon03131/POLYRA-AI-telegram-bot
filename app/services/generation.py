@@ -9,7 +9,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import contextlib
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator, Coroutine
 from dataclasses import dataclass, field
@@ -23,11 +26,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot.streaming.draft import MESSAGE_LIMIT, DraftStreamer, new_draft_id
 from app.config import Settings
+from app.context import TokenBudgetManager
 from app.db.repositories import (
     ChatRepository,
     ChatSummaryRepository,
     GenerationRunRepository,
     MessageRepository,
+    ModelOverrideRepository,
     UserSettingsRepository,
 )
 from app.llm.base import LLMRequest, LLMTool
@@ -50,6 +55,7 @@ from app.llm.tools.schemas import make_llm_tools
 from app.services.access import EffectivePermissions, is_model_allowed
 from app.services.chats import ChatService
 from app.services.llm_factory import LLMStreamFn
+from app.services.settings import get_effective_system_settings
 
 if TYPE_CHECKING:
     from app.context import ContextBuilder, ContextCompactor, TitleGenerator
@@ -103,6 +109,15 @@ class GenerationRegistry:
         """Число активных генераций пользователя (для max_concurrent_generations)."""
         return sum(1 for gen in self._by_draft.values() if gen.user_id == user_id)
 
+    async def stop_all_for_user(self, user_id: uuid.UUID) -> int:
+        """Остановить все активные генерации пользователя (revoke/ban). Вернёт число."""
+        count = 0
+        for gen in list(self._by_draft.values()):
+            if gen.user_id == user_id:
+                gen.cancellation.set()
+                count += 1
+        return count
+
     async def stop(self, tg_chat_id: int, draft_id: int) -> bool:
         """Запросить отмену (выставить cancellation); True, если генерация найдена."""
         gen = self.find_by_draft(tg_chat_id, draft_id)
@@ -145,6 +160,8 @@ class _PreparedGeneration:
     user_id: uuid.UUID | None = None
     memory_extraction_enabled: bool = False
     web_enabled: bool = False
+    max_output_tokens: int | None = None
+    llm_tools: list[LLMTool] | None = None
 
 
 def user_error_message(exc: BaseException, model_display: str) -> str:
@@ -238,6 +255,44 @@ def build_sources_suffix(sources: list[tuple[str, str]]) -> str:
     for i, (title, url) in enumerate(sources, 1):
         lines.append(f"{i}. [{title}]({url})")
     return "\n".join(lines)
+
+
+def _sum_usage(total: Usage, delta: Usage) -> Usage:
+    """Сумма usage двух событий; None-компоненты трактуются как 0 в сумме."""
+
+    def add(a: int | None, b: int | None) -> int | None:
+        if a is None and b is None:
+            return None
+        return (a or 0) + (b or 0)
+
+    return Usage(
+        input_tokens=add(total.input_tokens, delta.input_tokens),
+        output_tokens=add(total.output_tokens, delta.output_tokens),
+        reasoning_tokens=add(total.reasoning_tokens, delta.reasoning_tokens),
+        total_tokens=add(total.total_tokens, delta.total_tokens),
+    )
+
+
+@dataclass(slots=True)
+class _ConsumeState:
+    """Аккумулятор состояния потребления стрима (_consume)."""
+
+    text_parts: list[str] = field(default_factory=list)
+    usage: Usage | None = None
+    first_token_at: datetime | None = None
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    reasoning_chunks: int = 0
+    cancelled: bool = False
+    finish_reason: str | None = None
+
+    def apply_simple(self, event: LLMEvent) -> None:
+        """Не-text/Done события: Usage/ReasoningDelta/ToolCall."""
+        if isinstance(event, ReasoningDelta):
+            self.reasoning_chunks += 1
+        elif isinstance(event, ToolCall):
+            self.tool_calls.append(event)
+        elif isinstance(event, Usage):
+            self.usage = event
 
 
 def extract_user_text(parts: list[dict[str, Any]]) -> str:
@@ -347,11 +402,13 @@ class GenerationService:
         )
         try:
             await streamer.flush(force=True)  # стартовый плейсхолдер-драфт
-            llm_tools, tool_runner = self._prepare_tools(prepared, user, permissions)
+            tool_runner = None
+            if prepared.llm_tools and self._tool_registry is not None:
+                tool_runner = ToolRunner(self._tool_registry, session_factory=self._session_factory)
             loop_result = await self._stream_loop(
                 prepared,
                 streamer,
-                llm_tools=llm_tools,
+                llm_tools=prepared.llm_tools,
                 tool_runner=tool_runner,
                 user=user,
                 permissions=permissions,
@@ -359,7 +416,7 @@ class GenerationService:
             )
             if loop_result is None:
                 return  # ошибка уже обработана внутри (fail + save_failed)
-            final_outcome, tool_records = loop_result
+            final_outcome, tool_records, attempts, attempt_ids = loop_result
             if final_outcome.cancelled:
                 await self._save_cancelled(prepared, final_outcome, bot=bot, tg_chat_id=tg_chat_id)
             elif not final_outcome.text.strip():
@@ -385,25 +442,147 @@ class GenerationService:
         finally:
             self._generations.pop(tg_chat_id, prepared.draft_id)
 
-    def _prepare_tools(
+    async def _resolve_jina_reader(self) -> Any | None:
+        """JinaReader из search-конфига (A31); None, если не настроен."""
+        if self._search_manager is None:
+            return None
+        try:
+            return await self._search_manager.get_reader()
+        except Exception:
+            logger.warning("jina reader недоступен", exc_info=True)
+            return None
+
+    def _model_denial(
         self,
-        prepared: _PreparedGeneration,
-        user: User,
+        model_def: Any,
+        *,
+        overrides: dict[str, bool],
         permissions: EffectivePermissions,
-    ) -> tuple[list[LLMTool] | None, ToolRunner | None]:
-        """Собрать инструменты для запроса: права + web off + title-tool только без title."""
+        has_image: bool,
+    ) -> str | None:
+        """Проверки доступности модели; текст отказа или None (можно продолжать)."""
+        if not model_def.enabled or overrides.get(model_def.model_id) is False:
+            return (
+                f"⛔ Модель {model_def.display_name} отключена администратором. "
+                "Откройте Mini App и выберите другую модель."
+            )
+        if not is_model_allowed(permissions, model_def.model_id):
+            return _MODEL_DENIED_MESSAGE
+        if has_image and not model_def.supports_images:
+            image_models = [
+                m.display_name
+                for m in self._registry.filter_by_permissions(permissions.allowed_models)
+                if m.supports_images
+            ]
+            return (
+                f"⛔ Модель {model_def.display_name} не принимает изображения. "
+                f"Модели с поддержкой изображений: "
+                f"{', '.join(image_models) if image_models else 'нет доступных'}."
+            )
+        return None
+
+    def _resolve_tool_defs(
+        self,
+        *,
+        web_enabled: bool,
+        memory_enabled: bool,
+        chat_title: str | None,
+        permissions: EffectivePermissions,
+    ) -> list[Any]:
+        """Effective tools на запрос (A12): grant-права ∩ chat web/memory off.
+
+        Тот же набор попадает в LLMRequest.tools и в ToolRunner.allowed_tool_names."""
         if self._tool_registry is None:
-            return None, None
+            return []
         enabled = self._tool_registry.list_enabled(permissions)
-        if not prepared.web_enabled:
+        if not web_enabled:
             enabled = [t for t in enabled if t.required_permission != "web_search"]
-        if prepared.chat_title is not None:
+        if not memory_enabled:
+            enabled = [t for t in enabled if t.required_permission != "memory"]
+        if chat_title is not None:
             # set_chat_title доступен только пока title IS NULL
             enabled = [t for t in enabled if t.name != "set_chat_title"]
-        if not enabled:
-            return None, None
-        runner = ToolRunner(self._tool_registry, session_factory=self._session_factory)
-        return make_llm_tools(enabled), runner
+        return enabled
+
+    async def _build_context(
+        self,
+        session: AsyncSession,
+        bot: Bot,
+        tg_chat_id: int,
+        *,
+        chat_id: uuid.UUID,
+        model_def: Any,
+        history: list[Message],
+        messages_repo: MessageRepository,
+        base_system_prompt: str,
+        memories: list[str],
+        current_parts: list[dict[str, Any]],
+        tool_defs: list[Any],
+        effective_settings: Settings,
+    ) -> tuple[list[dict[str, Any]], str, bool, int | None] | None:
+        """Собрать контекст (builder/legacy). None — отказ отправлен пользователю."""
+        tools_estimate = sum(
+            TokenBudgetManager().estimate_text(tool.name + tool.description)
+            + TokenBudgetManager().estimate_text(str(tool.parameters))
+            for tool in tool_defs
+        )
+        if self._context_builder is None:
+            trimmed = history[-effective_settings.context_keep_recent * 2 :]
+            llm_messages = build_messages(history=trimmed, current_parts=current_parts)
+            return llm_messages, base_system_prompt, False, None
+
+        summary_row = await ChatSummaryRepository(session).get_for_chat(chat_id)
+        if summary_row is not None:
+            # A15: вся непокрытая история, а не только хвост лимита
+            history = await messages_repo.list_all(chat_id)
+            if model_def.supports_images:
+                await self._rehydrate_images(history, bot)
+        built = self._context_builder.build(
+            model=model_def,
+            base_system_prompt=base_system_prompt,
+            summary_json=summary_row.summary if summary_row is not None else None,
+            memories=memories,
+            history=history,
+            covered_until_message_id=(
+                summary_row.covered_until_message_id if summary_row is not None else None
+            ),
+            current_parts=current_parts,
+            tools_token_estimate=tools_estimate,
+        )
+        if not built.fits:
+            await session.commit()
+            await bot.send_message(
+                tg_chat_id,
+                "⛔ Контекст слишком большой даже после свёртки. Начните новый чат (/new).",
+            )
+            return None
+        llm_messages = [*built.messages, {"role": "user", "parts": current_parts}]
+        return llm_messages, built.system_prompt, built.needs_compaction, built.max_output_tokens
+
+    async def _rehydrate_images(self, history: list[Message], bot: Bot) -> None:
+        """Скачать bytes для image parts истории с telegram_file_id (transient).
+
+        bytes в БД не хранятся; builder читает part.data_base64 (runtime-атрибут).
+        Ошибки/oversize — молча пропускаем (фото деградирует в плейсхолдер).
+        """
+        for message in history:
+            for part in message.parts:
+                if part.type != "image" or not part.telegram_file_id:
+                    continue
+                if getattr(part, "data_base64", None):
+                    continue
+                try:
+                    tg_file = await bot.get_file(part.telegram_file_id)
+                    if tg_file.file_path is None:
+                        continue
+                    if tg_file.file_size and tg_file.file_size > self._settings.photo_max_bytes:
+                        continue
+                    buf = await bot.download_file(tg_file.file_path)
+                    data = buf.read() if buf is not None else b""
+                    if data and len(data) <= self._settings.photo_max_bytes:
+                        part.data_base64 = base64.b64encode(data).decode("ascii")  # type: ignore[attr-defined]
+                except TelegramAPIError:
+                    logger.info("rehydrate image failed (file_id=%s)", part.telegram_file_id[:24])
 
     async def _stream_loop(
         self,
@@ -415,24 +594,37 @@ class GenerationService:
         user: User,
         permissions: EffectivePermissions,
         cancellation: asyncio.Event,
-    ) -> tuple[StreamOutcome, list[tuple[ToolCall, ToolExecution]]] | None:
-        """Цикл «стрим → tool calls → стрим». None — ошибка (уже обработана)."""
+    ) -> tuple[StreamOutcome, list[tuple[ToolCall, ToolExecution]], list[str], list[str]] | None:
+        """Цикл «стрим → tool calls → стрим». None — ошибка (уже обработана).
+
+        Возвращает (итоговый outcome, tool records, attempt names, attempt project ids)."""
         messages = list(prepared.messages)
         text_parts: list[str] = []
-        usage: Usage | None = None
         first_token_at: datetime | None = None
         reasoning_chunks = 0
         tool_records: list[tuple[ToolCall, ToolExecution]] = []
         cancelled = False
         iterations = 0
+        # A07: usage суммируем по РАУНДАМ (внутри раунда usage-чанки кумулятивны —
+        # берём последний); попытки пула Gemini — через metadata["attempts"].
+        # Ни одного usage-события → None (unknown ≠ 0).
+        usage_total: Usage | None = None
+        attempts: list[str] = []
+        attempt_ids: list[str] = []
+        deadline = time.monotonic() + self._settings.max_generation_seconds
 
         while True:
+            if time.monotonic() > deadline:
+                logger.warning("generation overall deadline reached (run %s)", prepared.run_id)
+                break
             request = LLMRequest(
                 model=prepared.model_id,
                 messages=messages,
                 system_prompt=prepared.system_prompt,
                 thinking=prepared.thinking,
                 tools=llm_tools,
+                max_output_tokens=prepared.max_output_tokens,
+                metadata={"attempts": attempts, "attempt_ids": attempt_ids},
                 cancellation=cancellation,
             )
             try:
@@ -449,7 +641,7 @@ class GenerationService:
                 return None
 
             if outcome.usage is not None:
-                usage = outcome.usage
+                usage_total = _sum_usage(usage_total or Usage(), outcome.usage)
             if outcome.first_token_at is not None and first_token_at is None:
                 first_token_at = outcome.first_token_at
             reasoning_chunks += outcome.reasoning_chunks
@@ -461,47 +653,81 @@ class GenerationService:
                 break
             iterations += 1
             assert tool_runner is not None  # гарантировано _should_run_tools
-            tool_context = ToolContext(
-                user_id=user.id,
-                chat_id=prepared.chat_id,
-                permissions=permissions,
-                session_factory=self._session_factory,
-                settings=self._settings,
-                search_manager=self._search_manager,
-            )
-            messages.append(self._assistant_tool_message(outcome.tool_calls))
-            for call in outcome.tool_calls:
-                execution = await tool_runner.execute(
-                    call, tool_context, generation_run_id=prepared.run_id
-                )
-                tool_records.append((call, execution))
-                messages.append(
-                    {
-                        "role": "tool",
-                        "parts": [
-                            {
-                                "type": "tool_result",
-                                "call_id": call.id,
-                                "name": call.name,
-                                "content": execution.result.content,
-                                "is_error": execution.result.is_error,
-                            }
-                        ],
-                    }
-                )
-            if cancellation.is_set():
+            if await self._run_tool_round(
+                outcome,
+                prepared,
+                user,
+                permissions,
+                messages,
+                tool_runner,
+                tool_records,
+                cancellation,
+                llm_tools=llm_tools,
+            ):
                 cancelled = True
                 break
 
         final = StreamOutcome(
             text="".join(text_parts),
-            usage=usage,
+            usage=usage_total,
             cancelled=cancelled,
             tool_calls_count=len(tool_records),
             first_token_at=first_token_at,
             reasoning_chunks=reasoning_chunks,
         )
-        return final, tool_records
+        # attempts (попытки пула Gemini) возвращаются вместе с outcome (A07)
+        return final, tool_records, attempts, attempt_ids
+
+    async def _run_tool_round(
+        self,
+        outcome: StreamOutcome,
+        prepared: _PreparedGeneration,
+        user: User,
+        permissions: EffectivePermissions,
+        messages: list[dict[str, Any]],
+        tool_runner: ToolRunner,
+        tool_records: list[tuple[ToolCall, ToolExecution]],
+        cancellation: asyncio.Event,
+        llm_tools: list[LLMTool] | None,
+    ) -> bool:
+        """Один раунд tool calls. True — отменено (cancellation)."""
+        tool_context = ToolContext(
+            user_id=user.id,
+            chat_id=prepared.chat_id,
+            permissions=permissions,
+            session_factory=self._session_factory,
+            settings=self._settings,
+            search_manager=self._search_manager,
+            jina_reader=await self._resolve_jina_reader(),
+            allowed_tool_names=frozenset(t.name for t in (llm_tools or [])),
+        )
+        # A39: полный assistant turn — видимый текст раунда + вызовы (signatures).
+        messages.append(self._assistant_tool_message(outcome.tool_calls, outcome.text))
+        # A39: лимит вызовов в одном batch.
+        round_calls = outcome.tool_calls[: self._settings.max_tool_calls_per_round]
+        for call in round_calls:
+            # A11: отмена проверяется ПЕРЕД каждым side effect, не после пачки.
+            if cancellation.is_set():
+                return True
+            execution = await tool_runner.execute(
+                call, tool_context, generation_run_id=prepared.run_id
+            )
+            tool_records.append((call, execution))
+            messages.append(
+                {
+                    "role": "tool",
+                    "parts": [
+                        {
+                            "type": "tool_result",
+                            "call_id": call.id,
+                            "name": call.name,
+                            "content": execution.result.content,
+                            "is_error": execution.result.is_error,
+                        }
+                    ],
+                }
+            )
+        return cancellation.is_set()
 
     def _should_run_tools(
         self,
@@ -527,21 +753,24 @@ class GenerationService:
         return True
 
     @staticmethod
-    def _assistant_tool_message(tool_calls: list[ToolCall]) -> dict[str, Any]:
-        """Assistant-сообщение с tool_call parts (provider_meta — для thought signatures)."""
-        return {
-            "role": "assistant",
-            "parts": [
-                {
-                    "type": "tool_call",
-                    "id": call.id,
-                    "name": call.name,
-                    "arguments_json": call.arguments_json,
-                    "provider_meta": call.provider_meta,
-                }
-                for call in tool_calls
-            ],
-        }
+    def _assistant_tool_message(tool_calls: list[ToolCall], round_text: str = "") -> dict[str, Any]:
+        """Полный assistant turn: видимый текст раунда + вызовы (подписи сохранены).
+
+        A39: без round_text следующий запрос терял уже сказанный моделью текст."""
+        parts: list[dict[str, Any]] = []
+        if round_text:
+            parts.append({"type": "text", "text": round_text})
+        parts.extend(
+            {
+                "type": "tool_call",
+                "id": call.id,
+                "name": call.name,
+                "arguments_json": call.arguments_json,
+                "provider_meta": call.provider_meta,
+            }
+            for call in tool_calls
+        )
+        return {"role": "assistant", "parts": parts}
 
     def _schedule_maintenance(self, prepared: _PreparedGeneration, outcome: StreamOutcome) -> None:
         """Фон после успешного ответа: compaction, автоназвание, память."""
@@ -604,47 +833,42 @@ class GenerationService:
         warning (tools отключены). Отмена (event/CancelledError) — не ошибка:
         цикл прекращается, накопленный partial возвращается с cancelled=True.
         """
-        text_parts: list[str] = []
-        usage: Usage | None = None
-        first_token_at: datetime | None = None
-        tool_calls_count = 0
-        reasoning_chunks = 0
-        cancelled = False
-        tool_calls: list[ToolCall] = []
-        finish_reason: str | None = None
+        state = _ConsumeState()
         try:
             async for event in stream:
                 if cancellation.is_set():
-                    cancelled = True
+                    state.cancelled = True
                     break
                 if isinstance(event, TextDelta):
-                    if first_token_at is None:
-                        first_token_at = datetime.now(UTC)
-                    text_parts.append(event.text)
+                    if state.first_token_at is None:
+                        state.first_token_at = datetime.now(UTC)
+                    state.text_parts.append(event.text)
                     await streamer.append(event.text)
-                elif isinstance(event, ReasoningDelta):
-                    reasoning_chunks += 1
-                elif isinstance(event, ToolCall):
-                    tool_calls_count += 1
-                    tool_calls.append(event)
-                elif isinstance(event, Usage):
-                    usage = event
                 elif isinstance(event, Done):
-                    finish_reason = event.finish_reason
+                    state.finish_reason = event.finish_reason
                     break
+                else:
+                    state.apply_simple(event)
         except asyncio.CancelledError:
-            cancelled = True
+            state.cancelled = True
+        finally:
+            # Контракт FIX_V2 §1: закрыть стрим всегда (break на Done, отмена,
+            # ошибка) — у пула в finally живут report_success/reconcile.
+            aclose = getattr(stream, "aclose", None)
+            if aclose is not None:
+                with contextlib.suppress(Exception):
+                    await aclose()
         # Провайдер мог тихо завершить генератор по cancellation (без Done).
-        cancelled = cancelled or cancellation.is_set()
+        cancelled = state.cancelled or cancellation.is_set()
         return StreamOutcome(
-            text="".join(text_parts),
-            usage=usage,
+            text="".join(state.text_parts),
+            usage=state.usage,
             cancelled=cancelled,
-            tool_calls_count=tool_calls_count,
-            first_token_at=first_token_at,
-            reasoning_chunks=reasoning_chunks,
-            tool_calls=tool_calls,
-            finish_reason=finish_reason,
+            tool_calls_count=len(state.tool_calls),
+            first_token_at=state.first_token_at,
+            reasoning_chunks=state.reasoning_chunks,
+            tool_calls=state.tool_calls,
+            finish_reason=state.finish_reason,
         )
 
     async def _check_user_limits(
@@ -711,30 +935,47 @@ class GenerationService:
             await ChatRepository(session).touch(chat_id)
 
             user_settings = await UserSettingsRepository(session).get_or_create(user.id)
-            model_id, thinking = resolve_model_and_thinking(
-                chat=chat,
-                user_settings=user_settings,
-                settings=self._settings,
-                registry=self._registry,
+            # A13: effective system settings — DB system_settings поверх env (на запрос).
+            sys_settings = await get_effective_system_settings(session, self._settings)
+            effective_settings = self._settings.model_copy(
+                update={
+                    "default_model": sys_settings.default_model,
+                    "default_system_prompt": sys_settings.default_system_prompt,
+                    "max_tool_iterations": sys_settings.max_tool_iterations,
+                    "memory_retrieval_limit": sys_settings.memory_retrieval_limit,
+                    "memory_extraction_min_chars": sys_settings.memory_extraction_min_chars,
+                    "context_keep_recent": sys_settings.context_keep_recent,
+                    "context_trigger_ratio": sys_settings.context_trigger_ratio,
+                }
             )
-            model_def = self._registry.get(model_id)
-            if not is_model_allowed(permissions, model_id):
-                await session.commit()
-                await bot.send_message(tg_chat_id, _MODEL_DENIED_MESSAGE)
-                return None
-            if has_image and not model_def.supports_images:
-                image_models = [
-                    m.display_name
-                    for m in self._registry.filter_by_permissions(permissions.allowed_models)
-                    if m.supports_images
-                ]
+            # A25: сохранённая, но неизвестная/отключённая модель — явный отказ,
+            # а не молчаливый fallback на другую модель.
+            saved_model = chat.model_id or user_settings.default_model_id
+            if saved_model is not None and self._registry.get_or_none(saved_model) is None:
                 await session.commit()
                 await bot.send_message(
                     tg_chat_id,
-                    f"⛔ Модель {model_def.display_name} не принимает изображения. "
-                    f"Модели с поддержкой изображений: "
-                    f"{', '.join(image_models) if image_models else 'нет доступных'}.",
+                    f"⛔ Сохранённая модель «{saved_model}» больше недоступна. "
+                    "Откройте Mini App и выберите другую модель.",
                 )
+                return None
+            model_id, thinking = resolve_model_and_thinking(
+                chat=chat,
+                user_settings=user_settings,
+                settings=effective_settings,
+                registry=self._registry,
+            )
+            model_def = self._registry.get(model_id)
+            model_overrides = await ModelOverrideRepository(session).get_all()
+            denial = self._model_denial(
+                model_def,
+                overrides=model_overrides,
+                permissions=permissions,
+                has_image=has_image,
+            )
+            if denial is not None:
+                await session.commit()
+                await bot.send_message(tg_chat_id, denial)
                 return None
 
             # Per-user лимиты гранта (server-side; скрытая кнопка ≠ защита)
@@ -757,43 +998,60 @@ class GenerationService:
             if memory_enabled and self._memory_retriever is not None:
                 try:
                     retrieved = await self._memory_retriever.retrieve(
-                        user.id, user_text, limit=self._settings.memory_retrieval_limit
+                        user.id, user_text, limit=effective_settings.memory_retrieval_limit
                     )
                     memories = [memory.text for memory in retrieved]
                 except Exception:
                     logger.warning("memory retrieval failed (user %s)", user.id, exc_info=True)
 
-            base_system_prompt = chat.system_prompt_override or self._settings.default_system_prompt
+            base_system_prompt = (
+                chat.system_prompt_override or effective_settings.default_system_prompt
+            )
             chat_title = chat.title
-            needs_compaction = False
-            if self._context_builder is None:
-                history = history[-self._settings.recent_history_limit :]
-                llm_messages = build_messages(history=history, current_parts=current_parts)
-                system_prompt = base_system_prompt
-            else:
-                summary_row = await ChatSummaryRepository(session).get_for_chat(chat_id)
-                built = self._context_builder.build(
-                    model=model_def,
-                    base_system_prompt=base_system_prompt,
-                    summary_json=summary_row.summary if summary_row is not None else None,
-                    memories=memories,
-                    history=history,
-                )
-                llm_messages = [*built.messages, {"role": "user", "parts": current_parts}]
-                system_prompt = built.system_prompt
-                needs_compaction = built.needs_compaction
+            # Инструменты — до построения контекста: их описания входят в бюджет (A16).
+            tool_defs = self._resolve_tool_defs(
+                web_enabled=web_enabled,
+                memory_enabled=memory_enabled,
+                chat_title=chat_title,
+                permissions=permissions,
+            )
+            llm_tools = make_llm_tools(tool_defs) if tool_defs else None
+            context_result = await self._build_context(
+                session,
+                bot,
+                tg_chat_id,
+                chat_id=chat_id,
+                model_def=model_def,
+                history=history,
+                messages_repo=messages_repo,
+                base_system_prompt=base_system_prompt,
+                memories=memories,
+                current_parts=current_parts,
+                tool_defs=tool_defs,
+                effective_settings=effective_settings,
+            )
+            if context_result is None:
+                return None  # не влезает — пользователь уже получил отказ
+            llm_messages, system_prompt, needs_compaction, max_output_tokens = context_result
 
             draft_id = new_draft_id()
-            run = await GenerationRunRepository(session).create(
-                chat_id=chat_id,
-                user_id=user.id,
-                provider=model_def.provider,
-                model_id=model_id,
-                thinking_setting=thinking,
-                status="running",
-                draft_id=draft_id,
-            )
-            await session.commit()
+            try:
+                run = await GenerationRunRepository(session).create(
+                    chat_id=chat_id,
+                    user_id=user.id,
+                    provider=model_def.provider,
+                    model_id=model_id,
+                    thinking_setting=thinking,
+                    status="running",
+                    draft_id=draft_id,
+                )
+                await session.commit()
+            except IntegrityError:
+                # A05: partial unique index — вторая активная генерация на чат
+                # не проходит даже при гонке между процессами.
+                await session.rollback()
+                await bot.send_message(tg_chat_id, _BUSY_MESSAGE)
+                return None
         return _PreparedGeneration(
             chat_id=chat_id,
             run_id=run.id,
@@ -810,6 +1068,8 @@ class GenerationService:
             user_id=user.id,
             memory_extraction_enabled=memory_enabled,
             web_enabled=web_enabled,
+            max_output_tokens=max_output_tokens,
+            llm_tools=llm_tools,
         )
 
     async def _save_completed(

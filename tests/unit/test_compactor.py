@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator, Callable
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ import pytest
 from app.context.compactor import (
     ContextCompactor,
     SummaryState,
+    _normalize_summary,
     extract_json_object,
 )
 from app.context.titles import TitleGenerator, sanitize_title
@@ -245,6 +247,224 @@ async def test_no_new_segment_when_already_covered() -> None:
     # end = 6, start = 6 → сегмента нет.
     assert await compactor.maybe_compact(uuid.uuid4()) is False
     assert calls == []
+
+
+# --- A17: строгая summary -------------------------------------------------------
+
+
+def test_normalize_summary_strict_validation() -> None:
+    # {} / пустой текст / неправильные типы / отсутствие ключей → None.
+    assert _normalize_summary({}) is None
+    assert _normalize_summary({"conversation_summary": ""}) is None
+    assert _normalize_summary({"conversation_summary": "   "}) is None
+    wrong_types = {
+        "conversation_summary": 123,
+        "important_facts": [],
+        "decisions": [],
+        "open_threads": [],
+        "user_preferences": [],
+        "entities": [],
+    }
+    assert _normalize_summary(wrong_types) is None
+    missing_lists = {"conversation_summary": "нормальный текст"}
+    assert _normalize_summary(missing_lists) is None  # нет list-ключей
+    not_a_list = {**missing_lists, "important_facts": "не список"}
+    assert _normalize_summary(not_a_list) is None
+    ok = _normalize_summary(
+        {
+            "conversation_summary": "  пересказ  ",
+            "important_facts": ["факт", 42],
+            "decisions": [],
+            "open_threads": [],
+            "user_preferences": [],
+            "entities": [],
+        }
+    )
+    assert ok is not None
+    assert ok["conversation_summary"] == "пересказ"
+    assert ok["important_facts"] == ["факт", "42"]
+
+
+async def test_empty_json_object_rejected_boundary_not_moved() -> None:
+    # "{}" парсится как dict, но невалиден как сводка → неудача, boundary стоит.
+    messages = [_msg("user", f"m{i}") for i in range(8)]
+    summaries = FakeSummaryStore()
+    stream, calls = _stream_fn([[TextDelta("{}"), Done("stop")]])  # repair → тоже {}
+    compactor = _compactor(stream=stream, summaries=summaries, messages=FakeMessageStore(messages))
+
+    assert await compactor.maybe_compact(uuid.uuid4()) is False
+    assert len(calls) == 2  # ровно один repair
+    assert summaries.saved == []
+    assert summaries.state is None  # covered_until не продвинут
+
+
+async def test_wrong_typed_summary_rejected_boundary_not_moved() -> None:
+    wrong = (
+        '{"conversation_summary": 123, "important_facts": [], "decisions": [],'
+        ' "open_threads": [], "user_preferences": [], "entities": []}'
+    )
+    messages = [_msg("user", f"m{i}") for i in range(8)]
+    summaries = FakeSummaryStore()
+    stream, _ = _stream_fn([[TextDelta(wrong), Done("stop")]])
+    compactor = _compactor(stream=stream, summaries=summaries, messages=FakeMessageStore(messages))
+
+    assert await compactor.maybe_compact(uuid.uuid4()) is False
+    assert summaries.saved == []
+
+
+async def test_missing_keys_summary_rejected_boundary_not_moved() -> None:
+    incomplete = '{"conversation_summary": "текст без обязательных списков"}'
+    messages = [_msg("user", f"m{i}") for i in range(8)]
+    summaries = FakeSummaryStore()
+    stream, _ = _stream_fn([[TextDelta(incomplete), Done("stop")]])
+    compactor = _compactor(stream=stream, summaries=summaries, messages=FakeMessageStore(messages))
+
+    assert await compactor.maybe_compact(uuid.uuid4()) is False
+    assert summaries.saved == []
+
+
+async def test_invalid_json_then_valid_repair_still_saved() -> None:
+    # repair с ВАЛИДНОЙ сводкой — успех (строгость не мешает штатному repair).
+    messages = [_msg("user", f"m{i}") for i in range(8)]
+    summaries = FakeSummaryStore()
+    stream, _ = _stream_fn(
+        [
+            [TextDelta("{}"), Done("stop")],
+            [TextDelta(_VALID_JSON), Done("stop")],
+        ]
+    )
+    compactor = _compactor(stream=stream, summaries=summaries, messages=FakeMessageStore(messages))
+
+    assert await compactor.maybe_compact(uuid.uuid4()) is True
+    assert len(summaries.saved) == 1
+
+
+# --- A17: сериализация per chat_id и monotonic boundary -------------------------
+
+
+async def test_concurrent_compaction_same_chat_serialized() -> None:
+    messages = [_msg("user", f"m{i}") for i in range(8)]
+    summaries = FakeSummaryStore()
+    gate = asyncio.Event()
+    calls: list[LLMRequest] = []
+
+    def stream(request: LLMRequest) -> AsyncIterator[LLMEvent]:
+        calls.append(request)
+
+        async def gen() -> AsyncIterator[LLMEvent]:
+            if len(calls) == 1:
+                await gate.wait()  # первая compaction висит внутри LLM-вызова
+            yield TextDelta(_VALID_JSON)
+            yield Done("stop")
+
+        return gen()
+
+    compactor = _compactor(stream=stream, summaries=summaries, messages=FakeMessageStore(messages))
+    chat_id = uuid.uuid4()
+
+    first = asyncio.create_task(compactor.maybe_compact(chat_id))
+    await asyncio.sleep(0)  # первая дошла до LLM и висит на gate
+    assert len(calls) == 1
+    second = asyncio.create_task(compactor.maybe_compact(chat_id))
+    await asyncio.sleep(0.05)  # у второй было время отработать
+    assert len(calls) == 1  # вторая ждёт per-chat lock — LLM не вызван
+    gate.set()
+    assert await first is True
+    # вторая стартовала ПОСЛЕ сохранения первой: сегмент уже покрыт → no-op.
+    assert await second is False
+    assert len(calls) == 1  # двух параллельных LLM-вызовов не было
+    assert len(summaries.saved) == 1
+
+
+class _ScriptedSummaryStore(FakeSummaryStore):
+    """load() возвращает заскриптованные состояния по очереди, затем последнее."""
+
+    def __init__(self, loads: list[SummaryState | None]) -> None:
+        super().__init__(loads[0] if loads else None)
+        self._loads = list(loads)
+
+    async def load(self, chat_id: uuid.UUID) -> SummaryState | None:
+        if self._loads:
+            state = self._loads.pop(0)
+            self.state = state
+            return state
+        return self.state
+
+
+async def test_boundary_never_moves_backwards() -> None:
+    # Snapshot устарел: пока LLM думала, boundary продвинул другой writer → skip.
+    messages = [_msg("user", f"m{i}") for i in range(8)]
+    stale = SummaryState(
+        summary={"conversation_summary": "старая"}, covered_until_message_id=messages[2].id
+    )
+    advanced = SummaryState(
+        summary={"conversation_summary": "новая"}, covered_until_message_id=messages[7].id
+    )
+    summaries = _ScriptedSummaryStore([stale, advanced])
+    stream, _ = _stream_fn([[TextDelta(_VALID_JSON), Done("stop")]])
+    compactor = _compactor(
+        stream=stream,
+        summaries=summaries,
+        messages=FakeMessageStore(messages),
+        min_segment=2,
+    )
+
+    # Сегмент из stale: messages[3:6] → новый boundary m5 ПОЗЖЕ m2, но fresh
+    # состояние уже на m7 → сохранение откатило бы boundary → запрещено.
+    assert await compactor.maybe_compact(uuid.uuid4()) is False
+    assert summaries.saved == []
+    assert summaries.state is not None
+    assert summaries.state.covered_until_message_id == messages[7].id  # не откатился
+
+
+async def test_unknown_existing_boundary_allows_safe_recompute() -> None:
+    # Текущий covered_until не найден в истории (её чистили) → новый валиден.
+    messages = [_msg("user", f"m{i}") for i in range(8)]
+    stale = SummaryState(
+        summary={"conversation_summary": "старая"}, covered_until_message_id=messages[2].id
+    )
+    orphaned = SummaryState(
+        summary={"conversation_summary": "чужая"}, covered_until_message_id=uuid.uuid4()
+    )
+    summaries = _ScriptedSummaryStore([stale, orphaned])
+    stream, _ = _stream_fn([[TextDelta(_VALID_JSON), Done("stop")]])
+    compactor = _compactor(
+        stream=stream,
+        summaries=summaries,
+        messages=FakeMessageStore(messages),
+        min_segment=2,
+    )
+
+    assert await compactor.maybe_compact(uuid.uuid4()) is True
+    assert summaries.saved[0]["covered_until_message_id"] == messages[5].id
+
+
+# --- A17: порционный compaction (ограничение prompt) ----------------------------
+
+
+async def test_long_segment_prompt_capped_middle_elided() -> None:
+    # 38 сообщений сегмента по ~1010 символов → диалог ~38k > лимита 12k.
+    messages = [_msg("user", f"{i:03}-" + "x" * 1000) for i in range(40)]
+    summaries = FakeSummaryStore()
+    stream, calls = _stream_fn([[TextDelta(_VALID_JSON), Done("stop")]])
+    compactor = _compactor(
+        stream=stream,
+        summaries=summaries,
+        messages=FakeMessageStore(messages),
+        keep_recent=2,
+        min_segment=3,
+    )
+
+    assert await compactor.maybe_compact(uuid.uuid4()) is True
+    prompt = calls[0].messages[0]["parts"][0]["text"]
+    # голова и хвост сегмента сохранены, середина вырезана с маркером
+    assert "000-" in prompt
+    assert "037-" in prompt
+    assert "середина фрагмента пропущена" in prompt
+    assert "020-" not in prompt  # середина не попала в prompt
+    # boundary продвигается на весь сегмент, несмотря на усечение prompt
+    assert summaries.saved[0]["covered_until_message_id"] == messages[37].id
+    assert summaries.saved[0]["covered_messages_count"] == 38
 
 
 # --- sanitize_title ------------------------------------------------------------------

@@ -65,19 +65,21 @@ class SerpApiAIOverviewBackend:
         ai_overview = step1.get("ai_overview")
         if not isinstance(ai_overview, dict) or ai_overview.get("error"):
             return self._degrade(step1, options)
-        text_blocks = ai_overview.get("text_blocks") or []
+        text_blocks = self._text_blocks(ai_overview)
         if not text_blocks:
             page_token = ai_overview.get("page_token")
-            if not page_token:
+            if not isinstance(page_token, str) or not page_token:
                 return self._degrade(step1, options)
             step2 = await self._get_json({"engine": "google_ai_overview", "page_token": page_token})
             ai_overview = step2.get("ai_overview")
             if not isinstance(ai_overview, dict) or ai_overview.get("error"):
                 return self._degrade(step1, options)
-            text_blocks = ai_overview.get("text_blocks") or []
+            text_blocks = self._text_blocks(ai_overview)
         overview_text = self._overview_text(text_blocks)
         references = self._references(ai_overview, options)
-        if overview_text is None and not references:
+        if not references:
+            # A32: overview без references НЕ авторитетен — не выдаём текст,
+            # деградируем в обычный organic.
             return self._degrade(step1, options)
         return SearchOutcome(
             results=references,
@@ -103,21 +105,41 @@ class SerpApiAIOverviewBackend:
         return SearchOutcome(results=self._organic(step1, options), backend=self.backend_id)
 
     def _organic(self, payload: dict[str, Any], options: SearchOptions) -> list[SearchResult]:
+        raw_items = payload.get("organic_results")
+        if raw_items is None:
+            return []
+        if not isinstance(raw_items, list):
+            raise SearchBackendError(
+                f"{self.backend_id}: unexpected 'organic_results' (not a list)"
+            )
         results: list[SearchResult] = []
-        for item in (payload.get("organic_results") or [])[: options.max_results]:
-            link = item.get("link")
-            if not link:
+        for item in raw_items[: options.max_results]:
+            if not isinstance(item, dict):
                 continue
+            link = item.get("link")
+            if not isinstance(link, str) or not link:
+                continue
+            title = item.get("title")
+            snippet = item.get("snippet")
+            date = item.get("date")
             results.append(
                 SearchResult(
-                    title=item.get("title") or "",
+                    title=title if isinstance(title, str) else "",
                     url=link,
-                    snippet=item.get("snippet") or "",
+                    snippet=snippet if isinstance(snippet, str) else "",
                     source=hostname_of(link),
-                    published_at=item.get("date"),
+                    published_at=date if isinstance(date, str) else None,
                 )
             )
         return results
+
+    def _text_blocks(self, ai_overview: dict[str, Any]) -> list[Any]:
+        raw = ai_overview.get("text_blocks")
+        if raw is None:
+            return []
+        if not isinstance(raw, list):
+            raise SearchBackendError(f"{self.backend_id}: unexpected 'text_blocks' (not a list)")
+        return raw
 
     @staticmethod
     def _overview_text(text_blocks: list[Any]) -> str | None:
@@ -141,19 +163,28 @@ class SerpApiAIOverviewBackend:
 
     @staticmethod
     def _references(ai_overview: dict[str, Any], options: SearchOptions) -> list[SearchResult]:
+        raw_refs = ai_overview.get("references")
+        if raw_refs is None:
+            return []
+        if not isinstance(raw_refs, list):
+            raise SearchBackendError("serpapi_aio: unexpected 'references' (not a list)")
         results: list[SearchResult] = []
-        for ref in ai_overview.get("references") or []:
+        for ref in raw_refs:
             if not isinstance(ref, dict):
                 continue
             link = ref.get("link")
-            if not link:
+            if not isinstance(link, str) or not link:
                 continue
+            title = ref.get("title")
+            snippet = ref.get("snippet")
+            source = ref.get("source")
             results.append(
                 SearchResult(
-                    title=ref.get("title") or "",
+                    title=title if isinstance(title, str) else "",
                     url=link,
-                    snippet=ref.get("snippet") or "",
-                    source=ref.get("source") or hostname_of(link),
+                    snippet=snippet if isinstance(snippet, str) else "",
+                    source=(source if isinstance(source, str) and source else None)
+                    or hostname_of(link),
                 )
             )
             if len(results) >= options.max_results:

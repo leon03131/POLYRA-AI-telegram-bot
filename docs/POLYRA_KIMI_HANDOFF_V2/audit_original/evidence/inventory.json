@@ -1,0 +1,1292 @@
+[
+  {
+    "file": ".agents/reports/alibaba.md",
+    "bytes": 35233,
+    "lines": 226,
+    "sha256": "9e148cc592ff1a4bf663baf419e11dab942ed990c6aa4052d48533ece6af9241"
+  },
+  {
+    "file": ".agents/reports/gemini.md",
+    "bytes": 28986,
+    "lines": 201,
+    "sha256": "36f884d9dc6806ef75ecf2d38e3cb1b7c25d847310eb47f7a908fa2f8fff238c"
+  },
+  {
+    "file": ".agents/reports/probe_20260918_123651.json",
+    "bytes": 5655,
+    "lines": 158,
+    "sha256": "02c6c9087bdf53af4169a637272bd7a6fb8f264149b5c287322966cdff01a502"
+  },
+  {
+    "file": ".agents/reports/probe_20260918_130436.json",
+    "bytes": 5130,
+    "lines": 155,
+    "sha256": "a10708464c6253df669e02affddc5453bb0dc5d79e06b9aea939a0750fd45063"
+  },
+  {
+    "file": ".agents/reports/search.md",
+    "bytes": 29479,
+    "lines": 365,
+    "sha256": "4a2cd782bae51c363bb0be87783ce8333e3b988fd823179fc97dd05e2c70a52d"
+  },
+  {
+    "file": ".agents/reports/security_review.md",
+    "bytes": 19540,
+    "lines": 84,
+    "sha256": "315bb6ed2736a8e73193287e7c0ba8acd9c1465b2e4ea5259180f63674d00899"
+  },
+  {
+    "file": ".agents/reports/telegram.md",
+    "bytes": 23576,
+    "lines": 164,
+    "sha256": "a8ce2bf44774ecdc6f2875325a04c6a513f6421a63f8240832832166a6c67896"
+  },
+  {
+    "file": ".dockerignore",
+    "bytes": 503,
+    "lines": 41,
+    "sha256": "2e6928673a28a470f966a7660ddac83ab3d9514d1865cc4c02ec90c316ca0137"
+  },
+  {
+    "file": ".env.example",
+    "bytes": 533,
+    "lines": 9,
+    "sha256": "33b88cb5e8ea8aaecbcc0eaac92471450b631c3bf855d4c69ba72ab4364dd342"
+  },
+  {
+    "file": ".gitignore",
+    "bytes": 276,
+    "lines": 30,
+    "sha256": "ec8ee7b9644cdf04735669f58ef776ebe61a6c01c2a1f3636c3cb673fab6fcca"
+  },
+  {
+    "file": "Caddyfile",
+    "bytes": 166,
+    "lines": 6,
+    "sha256": "390a4c6aa7ef5b15b2af4d3756498967a01b59e565b50e65b860466322e61af9"
+  },
+  {
+    "file": "DECISIONS.md",
+    "bytes": 6499,
+    "lines": 87,
+    "sha256": "92490267a80cea0dbcfec350045dcd71b3f856fd6d3f2c8977f31a6161ce05de"
+  },
+  {
+    "file": "Dockerfile",
+    "bytes": 2358,
+    "lines": 60,
+    "sha256": "b49f890efcc1ea8bb85b2bdcae5a693ba8b5694b3cd11c3ec59b267bd792e61c"
+  },
+  {
+    "file": "KNOWN_ISSUES.md",
+    "bytes": 4194,
+    "lines": 45,
+    "sha256": "025ebb8b1ceed93fb69dbf2b9d34cd07ca7708277732aa82f941f15c8620fef0"
+  },
+  {
+    "file": "PLAN.md",
+    "bytes": 4577,
+    "lines": 87,
+    "sha256": "1b3099d0f3bbd1593c79ce7355d6d74151306dbd0d7ac2ebcb89e61d41f3b21c"
+  },
+  {
+    "file": "README.md",
+    "bytes": 15352,
+    "lines": 263,
+    "sha256": "8a79c9563233797e895badbea857638d11c25c32c965cad7917261bf0af00fee"
+  },
+  {
+    "file": "TASKS.md",
+    "bytes": 10140,
+    "lines": 144,
+    "sha256": "b37834987bb83a43000edeca7a743a37ca9160eeac53c46de7b2b42468579670"
+  },
+  {
+    "file": "alembic.ini",
+    "bytes": 1163,
+    "lines": 53,
+    "sha256": "a355e586b86cab40eb89c5708f0845ab6483b5e58d2b50a50ebbfc8e1d0a210d"
+  },
+  {
+    "file": "app/__init__.py",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "app/api/__init__.py",
+    "bytes": 128,
+    "lines": 5,
+    "sha256": "ba1de63f1324462a0edfa362ec9f52bc378648c08468edfebf7144cbe3111abd"
+  },
+  {
+    "file": "app/api/app.py",
+    "bytes": 2476,
+    "lines": 68,
+    "sha256": "cbf0c565b598bd6440f4d4c953757f1d2eaaab1ada30fa376f1bc6925c5c2779"
+  },
+  {
+    "file": "app/api/auth.py",
+    "bytes": 6116,
+    "lines": 146,
+    "sha256": "990bcaccb9ead4e468735a0fe2f31611e20667aea10ce2ca6e75eea4aed562ae"
+  },
+  {
+    "file": "app/api/dependencies.py",
+    "bytes": 4811,
+    "lines": 106,
+    "sha256": "3a86790c4f68d11c81d2c56db87b512a4d2e74a7382ed1a1c3df7adec26bd1e1"
+  },
+  {
+    "file": "app/api/routes/__init__.py",
+    "bytes": 530,
+    "lines": 31,
+    "sha256": "d36b43316bd406413a233ffe3fcf56afc294222cca8184e983c24a26ee692957"
+  },
+  {
+    "file": "app/api/routes/admin_access.py",
+    "bytes": 4738,
+    "lines": 138,
+    "sha256": "30235bcf8962c67fc68e69ddb7998a3666934c5de1bd7f54696000ec7e22cc4f"
+  },
+  {
+    "file": "app/api/routes/admin_gemini.py",
+    "bytes": 10064,
+    "lines": 270,
+    "sha256": "f4c61c968cf055882c41ca6a048c0158590e777370f1d687ebf766e54275909e"
+  },
+  {
+    "file": "app/api/routes/admin_providers.py",
+    "bytes": 2585,
+    "lines": 68,
+    "sha256": "1fedc72158b00bbb2d6ce4bb72d8ac8d60b7dc26fccab1ed032a092d3e552d0c"
+  },
+  {
+    "file": "app/api/routes/admin_search.py",
+    "bytes": 4525,
+    "lines": 126,
+    "sha256": "2b88eb4fdc1047b8500847c3d40850e8bbfa935e0893288770df7e535e50db52"
+  },
+  {
+    "file": "app/api/routes/admin_stats.py",
+    "bytes": 3793,
+    "lines": 101,
+    "sha256": "70d310e01e6226d7af17700a7fb5c5455f0898b60bb4a1c685bee4626ae8fc06"
+  },
+  {
+    "file": "app/api/routes/admin_system.py",
+    "bytes": 5094,
+    "lines": 127,
+    "sha256": "c6a5b76407b0b207475622eb2d565896d5770b2130093179d1aeafb691f7cda2"
+  },
+  {
+    "file": "app/api/routes/admin_users.py",
+    "bytes": 4566,
+    "lines": 118,
+    "sha256": "b94475ef0529fe183067f83eefeb9278cd4444e1419d358cc3be41b3f10f77d0"
+  },
+  {
+    "file": "app/api/routes/auth.py",
+    "bytes": 3787,
+    "lines": 94,
+    "sha256": "41a2ec5d2c2f0e66dceb562d76a5ff4733d4ea9da09df549a76a0666880061e9"
+  },
+  {
+    "file": "app/api/routes/chats.py",
+    "bytes": 6932,
+    "lines": 179,
+    "sha256": "3c0b8ae970f7bfae3ee2f1e9b1ddd1189b8b299e8bd7b0854824dad19634fdff"
+  },
+  {
+    "file": "app/api/routes/me.py",
+    "bytes": 2387,
+    "lines": 64,
+    "sha256": "06b06d6a291bc2383418f395764596b16f2ed02d5b9ad86b70b4e50fd45e3f4a"
+  },
+  {
+    "file": "app/api/routes/memory.py",
+    "bytes": 2785,
+    "lines": 73,
+    "sha256": "5effed6923a86a7814c2e0f07767d42d8ef62043af0180bd6ab6a901673fd51c"
+  },
+  {
+    "file": "app/api/routes/settings.py",
+    "bytes": 3518,
+    "lines": 83,
+    "sha256": "38a51ec4bcab11f833c886b00bca4efe7539982f3599c82084a5d008cc2ce2e9"
+  },
+  {
+    "file": "app/bot/__init__.py",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "app/bot/dispatcher.py",
+    "bytes": 2586,
+    "lines": 67,
+    "sha256": "2a5ce93bbb4f0675fb4b3f3430d0f2b6a4270a9c30c2e181b9f0030863bda322"
+  },
+  {
+    "file": "app/bot/middleware/__init__.py",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "app/bot/middleware/access.py",
+    "bytes": 4384,
+    "lines": 105,
+    "sha256": "16ea8901f2b0fc0543223966d3e07db2d2c36002eba141f9fc5a588f331ba372"
+  },
+  {
+    "file": "app/bot/middleware/errors.py",
+    "bytes": 1226,
+    "lines": 29,
+    "sha256": "b9f0b2782e35cdabc42ce3bec1e0602536c00f5545e3a12ce9a2d5efafc7a33f"
+  },
+  {
+    "file": "app/bot/routers/__init__.py",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "app/bot/routers/chat.py",
+    "bytes": 1370,
+    "lines": 41,
+    "sha256": "327abefd9c22ca6b9f59b55ec70de7237e759d77fc309c29376e0cdddd2e178d"
+  },
+  {
+    "file": "app/bot/routers/commands.py",
+    "bytes": 6123,
+    "lines": 172,
+    "sha256": "aa2fbd19a6e748ec1873dea06cba7d10400f78ab28d9ad54e1273ea7f5c4801d"
+  },
+  {
+    "file": "app/bot/routers/photos.py",
+    "bytes": 2678,
+    "lines": 74,
+    "sha256": "7ca21df3d27f4cbf866318c334a5afd2d5b6e23cb187b5a6aee23b0b48ee7eac"
+  },
+  {
+    "file": "app/bot/routers/stop.py",
+    "bytes": 909,
+    "lines": 31,
+    "sha256": "2c692a808af3b1ea1999bf919a5df0a5bf73d88528f94ce59b1f1eed0866ba72"
+  },
+  {
+    "file": "app/bot/streaming/__init__.py",
+    "bytes": 166,
+    "lines": 5,
+    "sha256": "53affbff2e764d9843cd3e2b5c48ed83eac3567277ff24114effc4bb9a54ef18"
+  },
+  {
+    "file": "app/bot/streaming/draft.py",
+    "bytes": 11149,
+    "lines": 251,
+    "sha256": "86ee5ce14270c10fe28fcf22874544396766b144aef702ec556c634367d74c8b"
+  },
+  {
+    "file": "app/config.py",
+    "bytes": 3528,
+    "lines": 79,
+    "sha256": "203423d71d41c0da6fd540a955b2f706d7651d208f1ee11c0e1a56aed028fdaa"
+  },
+  {
+    "file": "app/context/__init__.py",
+    "bytes": 591,
+    "lines": 17,
+    "sha256": "6b658a991aefbc0248f529ba149a4e73367929d57eb74f7c73705a33531ce59f"
+  },
+  {
+    "file": "app/context/builder.py",
+    "bytes": 5937,
+    "lines": 147,
+    "sha256": "4a9be3854d2fe7960d9dd5b5162a5f38ac7f8d0efe8e24f815d83b10b0a42aed"
+  },
+  {
+    "file": "app/context/compactor.py",
+    "bytes": 12419,
+    "lines": 308,
+    "sha256": "d4fda3bde967c3f5bafe13f779dd22413813ebfc5e1c0a1fea55cf7082364bd8"
+  },
+  {
+    "file": "app/context/titles.py",
+    "bytes": 3912,
+    "lines": 96,
+    "sha256": "1be009e197f327c72b9f7d5e6ebaff8932870d0ccc65c1ad9a86d4fa74db1755"
+  },
+  {
+    "file": "app/context/token_budget.py",
+    "bytes": 2885,
+    "lines": 73,
+    "sha256": "ff80d2a643d6889b221915a0250d2ab86f4a06a1f6e1ad396fb35baac1b6a3ea"
+  },
+  {
+    "file": "app/db/__init__.py",
+    "bytes": 480,
+    "lines": 17,
+    "sha256": "ea0bc19aa5d8d72a507b9787819cf0e4724f4228fc1d58b894515c921558aaa6"
+  },
+  {
+    "file": "app/db/base.py",
+    "bytes": 1490,
+    "lines": 42,
+    "sha256": "09608c025f23d31b9af78168f4481d4ebd516cc9a124ca5826d9851d11659b04"
+  },
+  {
+    "file": "app/db/migrations/env.py",
+    "bytes": 3332,
+    "lines": 98,
+    "sha256": "2893cdf9ce4e57c19a63cc4a5bf584a6184e9544dd1359244c57fbd6c8f47dd7"
+  },
+  {
+    "file": "app/db/migrations/script.py.mako",
+    "bytes": 621,
+    "lines": 26,
+    "sha256": "52c5a230257ed9f4a82f6a72509fccb98e871459588e4e86caec7482178e2e48"
+  },
+  {
+    "file": "app/db/migrations/versions/0001_initial.py",
+    "bytes": 5211,
+    "lines": 142,
+    "sha256": "583a210159350406894497370ece692f922bc720774e6c626e9c0603dc6dbcf2"
+  },
+  {
+    "file": "app/db/migrations/versions/0002_chat_core.py",
+    "bytes": 6301,
+    "lines": 159,
+    "sha256": "eb7fab03585b92e1adb7a105245020feccc767e466dae71c152a2c531dca5cfc"
+  },
+  {
+    "file": "app/db/migrations/versions/0003_gemini_pool.py",
+    "bytes": 4658,
+    "lines": 125,
+    "sha256": "abf8e9a9a842b8248667e5f2dc455ed0a93fa4868b6e0e760269ea98640d037f"
+  },
+  {
+    "file": "app/db/migrations/versions/0004_credentials_quotas.py",
+    "bytes": 3271,
+    "lines": 100,
+    "sha256": "6b33293eb58845fb844364a0fb6571d6710732736a9b4b6d0052aaf0e094abfb"
+  },
+  {
+    "file": "app/db/migrations/versions/0005_chat_summaries.py",
+    "bytes": 1868,
+    "lines": 67,
+    "sha256": "359aebf5ba43c2d898c9610bac4c490b6f8c030f71db997a7a73b2c404094ead"
+  },
+  {
+    "file": "app/db/migrations/versions/0006_memories.py",
+    "bytes": 2134,
+    "lines": 68,
+    "sha256": "577b6bcd81ea277d514fb39e67d1ec42cfdee4c46b5c3bed1c865189ec0d742c"
+  },
+  {
+    "file": "app/db/migrations/versions/0007_search_tools.py",
+    "bytes": 3011,
+    "lines": 85,
+    "sha256": "cad5a5f88c4c14ef31cc6a387a754e2fe36488fda54d22849bf5d35bf74852fd"
+  },
+  {
+    "file": "app/db/migrations/versions/0008_system_audit.py",
+    "bytes": 2314,
+    "lines": 76,
+    "sha256": "8e29c0c612e9c4a711c9a6805cf41b5358707702d07c6fffdb445ff7623de29a"
+  },
+  {
+    "file": "app/db/models/__init__.py",
+    "bytes": 1232,
+    "lines": 37,
+    "sha256": "f816e3ad227a24313641ce25464f732f9c19f720adfcae1dd7ed4200d1776017"
+  },
+  {
+    "file": "app/db/models/access.py",
+    "bytes": 3117,
+    "lines": 83,
+    "sha256": "a211d48d7de03e1486f1c07480417fc7529282e245dfe224211beefed8150fef"
+  },
+  {
+    "file": "app/db/models/audit_log.py",
+    "bytes": 1263,
+    "lines": 36,
+    "sha256": "30b3836aaba04b20ce7c17ff9bb7e5605900fcbdab3a2aaa33a174face56c7f7"
+  },
+  {
+    "file": "app/db/models/chat.py",
+    "bytes": 1161,
+    "lines": 29,
+    "sha256": "868f8bdc1785b878c08ecd73a31661a9b07fa733008356dda89e2ad531d61915"
+  },
+  {
+    "file": "app/db/models/chat_summary.py",
+    "bytes": 1272,
+    "lines": 36,
+    "sha256": "11328444b9690ac7e61b09b81cf462b6c2d93d31649920f9f4c7146af143c936"
+  },
+  {
+    "file": "app/db/models/credential.py",
+    "bytes": 907,
+    "lines": 20,
+    "sha256": "ae2f4896ed15fc780df8decd9c43eb53f918c9bf795b5367a3d47fed3fc84191"
+  },
+  {
+    "file": "app/db/models/gemini.py",
+    "bytes": 3662,
+    "lines": 87,
+    "sha256": "22b18661b6b2a9be3d68953cdc477c9a2d077702223360848af4b37d89e53311"
+  },
+  {
+    "file": "app/db/models/generation_run.py",
+    "bytes": 1989,
+    "lines": 42,
+    "sha256": "163e0694dd8ce55f83b50ab824213d02b344221b05e152c64466bd2479f8a9b3"
+  },
+  {
+    "file": "app/db/models/memory.py",
+    "bytes": 1530,
+    "lines": 35,
+    "sha256": "d09c63ba8a6a0b61334ecd2cdfbca7337cbeba84fe6a12abba1ed1f2d9de8f74"
+  },
+  {
+    "file": "app/db/models/message.py",
+    "bytes": 2549,
+    "lines": 66,
+    "sha256": "aa9cdbba717f0fe4f911e1d0cc3fee9c4b25f774cba3671b65662d609f5b3414"
+  },
+  {
+    "file": "app/db/models/search_config.py",
+    "bytes": 1102,
+    "lines": 23,
+    "sha256": "77ecab81e690589166eccb8cee286d75ff96382cc8a07397e83302dacd53ebc3"
+  },
+  {
+    "file": "app/db/models/system_setting.py",
+    "bytes": 637,
+    "lines": 18,
+    "sha256": "63731eb4566760e7f6dbda1d3d82273f1bd53dc68eef9fdcd62aa9b80381c073"
+  },
+  {
+    "file": "app/db/models/tool_call.py",
+    "bytes": 1170,
+    "lines": 31,
+    "sha256": "bf7147d2917d35d3ad72d30dce01ce3718cba0b6afeea9a57cc4bc16d12affcc"
+  },
+  {
+    "file": "app/db/models/user.py",
+    "bytes": 1236,
+    "lines": 26,
+    "sha256": "735ef06b427253b4ad04f3fadc0d73e884e56a87a541d8b0fcb48519223e4e5b"
+  },
+  {
+    "file": "app/db/repositories/__init__.py",
+    "bytes": 1566,
+    "lines": 43,
+    "sha256": "d6405a588240be7dde7bfb23114e04d4778878a9a8f393e55e72ba5d80cfabb7"
+  },
+  {
+    "file": "app/db/repositories/access.py",
+    "bytes": 5249,
+    "lines": 124,
+    "sha256": "99e7df1bc718a7f5afb1d163d98d4b397aa7d89d8350f54dc8f4420ba5110ac8"
+  },
+  {
+    "file": "app/db/repositories/audit_logs.py",
+    "bytes": 1387,
+    "lines": 42,
+    "sha256": "ae2ae02bb54c2c49777bec15a97ee9d3cbe53f533704fac8c9f918011e2dd960"
+  },
+  {
+    "file": "app/db/repositories/chat_summaries.py",
+    "bytes": 1696,
+    "lines": 47,
+    "sha256": "2125d4b9e4342b66330b079f42ae2179f532ee823f0d80adea62144f8e351ced"
+  },
+  {
+    "file": "app/db/repositories/chats.py",
+    "bytes": 3818,
+    "lines": 99,
+    "sha256": "6d351cf429e605ecd66a6db5e35f2c08ae97605c8f4c6eec82143e5aedec3fd7"
+  },
+  {
+    "file": "app/db/repositories/credentials.py",
+    "bytes": 2605,
+    "lines": 61,
+    "sha256": "aa4a3eb14404259c3c5ff35f979efc279bcc08cc079b3efcb9d2941fc669d578"
+  },
+  {
+    "file": "app/db/repositories/gemini.py",
+    "bytes": 11651,
+    "lines": 306,
+    "sha256": "67b891a8e6a2a3add9f6c681be35ef10fdb61267108b798fafdf5bbeaa2ad41f"
+  },
+  {
+    "file": "app/db/repositories/generation_runs.py",
+    "bytes": 3492,
+    "lines": 87,
+    "sha256": "ee9de9dbc359e00174dced8b18f712d0328f388a4b67854a96a1bc2383c044f7"
+  },
+  {
+    "file": "app/db/repositories/memories.py",
+    "bytes": 4352,
+    "lines": 112,
+    "sha256": "5d31c8b6c5393c8af96ea0fe354c35e065313b1df3ea6f054311ff9e3f5834f6"
+  },
+  {
+    "file": "app/db/repositories/messages.py",
+    "bytes": 3211,
+    "lines": 74,
+    "sha256": "5f45a953efec853ce84b06dd6134f2600cb62a57596c22b4059bade4c459b12d"
+  },
+  {
+    "file": "app/db/repositories/search_configs.py",
+    "bytes": 3310,
+    "lines": 78,
+    "sha256": "7bdbcf666130bd64e6444a8a45b033e0e70a6a95f66c907eea370f14e64250af"
+  },
+  {
+    "file": "app/db/repositories/system_settings.py",
+    "bytes": 1588,
+    "lines": 38,
+    "sha256": "f638bb041fcf5c1ce9f69408295e8cd2566b793a96dbbea36cd4189d94455a7e"
+  },
+  {
+    "file": "app/db/repositories/tool_calls.py",
+    "bytes": 1515,
+    "lines": 51,
+    "sha256": "81fe75d99f36608aa2147c19db5de6528717b3f39d81d814c7ee0cb20184984f"
+  },
+  {
+    "file": "app/db/repositories/users.py",
+    "bytes": 3112,
+    "lines": 83,
+    "sha256": "0eb0a24a480c9e077435462d47b000f500eac7a6e399b691acda2b9d7731421f"
+  },
+  {
+    "file": "app/db/session.py",
+    "bytes": 1172,
+    "lines": 33,
+    "sha256": "650b23899b0af192657e1849174d47d9c4b413432dd3f411c7cfd4f9bfae336b"
+  },
+  {
+    "file": "app/llm/__init__.py",
+    "bytes": 71,
+    "lines": 1,
+    "sha256": "88bb3bdf0661cfa58056bd07dcd2917363f3e5b9983e694e198fe938b8e85734"
+  },
+  {
+    "file": "app/llm/base.py",
+    "bytes": 2480,
+    "lines": 65,
+    "sha256": "fa905054b61340c5772e1b58e91e23a6c4d2eb7832d36d2dd609f903e8f685fa"
+  },
+  {
+    "file": "app/llm/capabilities.py",
+    "bytes": 6038,
+    "lines": 153,
+    "sha256": "c47fd1ff75c06e75a9ab97a34e54fc1ea5f183db98dbda15ebc22acc541e4901"
+  },
+  {
+    "file": "app/llm/errors.py",
+    "bytes": 4365,
+    "lines": 113,
+    "sha256": "4ffc51cac6e3a520912081aad8982548c08f2609c28dabd84e1475b723485c8c"
+  },
+  {
+    "file": "app/llm/events.py",
+    "bytes": 2033,
+    "lines": 65,
+    "sha256": "3410311ea1d2f94776ba5375720f3b6bd4f292e3042467ca55449b9ed02c62d5"
+  },
+  {
+    "file": "app/llm/gemini/__init__.py",
+    "bytes": 754,
+    "lines": 36,
+    "sha256": "34d63be044a975886941eff6639e56f7a3dbb8f5cb2fb45d032254ef3cb96252"
+  },
+  {
+    "file": "app/llm/gemini/pool.py",
+    "bytes": 10703,
+    "lines": 244,
+    "sha256": "0d2e36dfd4df152c3d66a6d7515cbcf920ec16d1c10cda75b1f70b7bfb098c4d"
+  },
+  {
+    "file": "app/llm/gemini/quota.py",
+    "bytes": 4766,
+    "lines": 119,
+    "sha256": "a842c7b532ee7b8cafed173490111e5ce66ad327d560f8e79e5aa142f13c04cb"
+  },
+  {
+    "file": "app/llm/gemini/store_db.py",
+    "bytes": 5756,
+    "lines": 148,
+    "sha256": "260bd5a279ccc3bd0e2fe92737dc5041677a011e65cbf976c1312ae31a9976fb"
+  },
+  {
+    "file": "app/llm/providers/__init__.py",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "app/llm/providers/alibaba.py",
+    "bytes": 14234,
+    "lines": 363,
+    "sha256": "1dba33339961f186e1e420f1aab3ac67439bb332740f65cff67dc69504f2a9ef"
+  },
+  {
+    "file": "app/llm/providers/gemini.py",
+    "bytes": 12969,
+    "lines": 334,
+    "sha256": "b0377626881286ba88f852f650e972184ac5a29ac5d45625090d9d08ee8eec46"
+  },
+  {
+    "file": "app/llm/registry.py",
+    "bytes": 2034,
+    "lines": 55,
+    "sha256": "676177bef9a7632b6c19f9167b0c55557c8dd2c54e32df53d35794993618b67d"
+  },
+  {
+    "file": "app/llm/router.py",
+    "bytes": 1432,
+    "lines": 33,
+    "sha256": "56a2c9892cb98b5918f4dafdf11ba61fa489525e85649a6468acccd373b6d735"
+  },
+  {
+    "file": "app/llm/tools/__init__.py",
+    "bytes": 646,
+    "lines": 18,
+    "sha256": "82bc3a863fe25729ae52561640e9896b52376acfee065eb3826487ee7a030d30"
+  },
+  {
+    "file": "app/llm/tools/builtin.py",
+    "bytes": 11863,
+    "lines": 307,
+    "sha256": "b7a245d1c6a7ec03dc089483b70c4bc93d50a4c4eef9f351b6794efcf7b25b47"
+  },
+  {
+    "file": "app/llm/tools/registry.py",
+    "bytes": 3040,
+    "lines": 79,
+    "sha256": "5ba9be253e452d7e800a240b8cb499021a52fa8849ab618fc8664c05f1931cb5"
+  },
+  {
+    "file": "app/llm/tools/runner.py",
+    "bytes": 7254,
+    "lines": 191,
+    "sha256": "210442274374bd81e7b27a8cd583f8ea5b6c50891f0bdb5478446add4366ec70"
+  },
+  {
+    "file": "app/llm/tools/schemas.py",
+    "bytes": 5517,
+    "lines": 130,
+    "sha256": "cc0a26c27cb02518e7a1ffacff5bbd2e9c259b020655ef0da31fffaba63c702e"
+  },
+  {
+    "file": "app/main.py",
+    "bytes": 4402,
+    "lines": 128,
+    "sha256": "f32f889fb4ae672e8a19c5eb187c67df8e90f0ed858e9cd974d87769ba02d76f"
+  },
+  {
+    "file": "app/memory/__init__.py",
+    "bytes": 652,
+    "lines": 18,
+    "sha256": "2238bef75e45a7125cec09a1ba6c5371cd0e9c463d0d8223202965a008a1f4b0"
+  },
+  {
+    "file": "app/memory/deduplicator.py",
+    "bytes": 1321,
+    "lines": 37,
+    "sha256": "e01d70cfdbb8b8a94207458ff5a0413a5052aaede5280fa9ba77feadcd23a179"
+  },
+  {
+    "file": "app/memory/extractor.py",
+    "bytes": 11546,
+    "lines": 285,
+    "sha256": "cf00dfa6916603336e68cb3ee7b24bae328924888b0c0bc14394be93ecf5f8b7"
+  },
+  {
+    "file": "app/memory/normalizer.py",
+    "bytes": 796,
+    "lines": 18,
+    "sha256": "0e593bbf9f70efd25ca9692345430c67c540ccc4d8d2a6828a9623e35aa50e30"
+  },
+  {
+    "file": "app/memory/retriever.py",
+    "bytes": 3861,
+    "lines": 94,
+    "sha256": "b2943f26eb70e66c11b2f4e6b4b3812cfd26dd374b0f9d0a7aa8e7c8550583e1"
+  },
+  {
+    "file": "app/observability/__init__.py",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "app/observability/logging.py",
+    "bytes": 2631,
+    "lines": 70,
+    "sha256": "cf00ab9b33b3fd01cadd648cc47d808de5e28293537f7c10b77f9c52c7525c24"
+  },
+  {
+    "file": "app/search/__init__.py",
+    "bytes": 1159,
+    "lines": 40,
+    "sha256": "8092ee5e2b35fc6f2f08d1b50a60b80c015e6fafcd0eea4a5f842a726f947069"
+  },
+  {
+    "file": "app/search/base.py",
+    "bytes": 5189,
+    "lines": 149,
+    "sha256": "e45068e94f16cf217008372863b77a036a6d89be161a5b82894f1ff76a8e3215"
+  },
+  {
+    "file": "app/search/brave.py",
+    "bytes": 2639,
+    "lines": 78,
+    "sha256": "d2f5975a8d5b6ae462ff3d44f97d2fa19ec26ce3222fc5b51241e1cbb05a8b32"
+  },
+  {
+    "file": "app/search/fetcher.py",
+    "bytes": 6520,
+    "lines": 163,
+    "sha256": "216b73b4e493578c4da084a4688d526efc69d11d8076e15dd0b5494026526934"
+  },
+  {
+    "file": "app/search/jina.py",
+    "bytes": 4813,
+    "lines": 140,
+    "sha256": "39b9f0c76555b2ebe8fe216fd4d5790353765a230b5a92633aa71f3ee1c4bb9f"
+  },
+  {
+    "file": "app/search/manager.py",
+    "bytes": 8566,
+    "lines": 217,
+    "sha256": "5632540d21273dd9659c26cb3c4e531e99bc78512ccae5d547188cfd706e9b61"
+  },
+  {
+    "file": "app/search/playwright_google.py",
+    "bytes": 4288,
+    "lines": 104,
+    "sha256": "398644bb550500275f0829686970b28cd89e37d67dccb5bc71062143a0f3dff9"
+  },
+  {
+    "file": "app/search/reader.py",
+    "bytes": 2299,
+    "lines": 84,
+    "sha256": "57a811a98e88d42b84fedd200ee8bd710c95b25149007dc1682912a05aa1eecc"
+  },
+  {
+    "file": "app/search/serpapi_ai_overview.py",
+    "bytes": 6648,
+    "lines": 161,
+    "sha256": "a6b902edd15f55aaa1a3e230d3b76e7e2d4f6a1706db46c7cd412b4feffb313a"
+  },
+  {
+    "file": "app/search/serper.py",
+    "bytes": 2333,
+    "lines": 73,
+    "sha256": "7e0dc865a00de58a755f5bfe196e8cd78a71de25e1115ca9b77f7a5e4340b15e"
+  },
+  {
+    "file": "app/security/__init__.py",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "app/security/crypto.py",
+    "bytes": 1822,
+    "lines": 54,
+    "sha256": "0ade5ddfc52a01151062d78cde77bd87183e20cf3f1a613067e0360b1d32f8e3"
+  },
+  {
+    "file": "app/security/ssrf.py",
+    "bytes": 2930,
+    "lines": 71,
+    "sha256": "31372c032dd8f7d02ab099fc328e8b5e9b98e5592789a1647fb5298192212094"
+  },
+  {
+    "file": "app/services/__init__.py",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "app/services/access.py",
+    "bytes": 3686,
+    "lines": 114,
+    "sha256": "1c5a8f2294a54a97546fee8d2dd497c9f00a13fd3f78710663fb9bfe02625ea2"
+  },
+  {
+    "file": "app/services/admin.py",
+    "bytes": 8519,
+    "lines": 246,
+    "sha256": "abe5ae9240154eecd765f573021eb678b9d2d0fee1890344b64ae26174472bd7"
+  },
+  {
+    "file": "app/services/chats.py",
+    "bytes": 5219,
+    "lines": 117,
+    "sha256": "b9fd48287d944375c2725083f27d088d9887493de2b718712b55d5c133afb855"
+  },
+  {
+    "file": "app/services/credentials.py",
+    "bytes": 914,
+    "lines": 23,
+    "sha256": "7a7dca28c705b84827e845e32e901c70e459ce6e269ccc24a8509eeddae760b5"
+  },
+  {
+    "file": "app/services/generation.py",
+    "bytes": 41301,
+    "lines": 934,
+    "sha256": "fb6922c65e3f6c650f7515049d505dd5d5009e27e031369998023ebfb3280af6"
+  },
+  {
+    "file": "app/services/llm_factory.py",
+    "bytes": 2743,
+    "lines": 63,
+    "sha256": "f661c72523be8327e18a9992f1018d65285924230f0de9f8abd480b780494a69"
+  },
+  {
+    "file": "docker-compose.yml",
+    "bytes": 2337,
+    "lines": 74,
+    "sha256": "4099535fee1d9cd01cc6cce037f11eb64a9a1160ce9284ff38a4b93e1b46cedb"
+  },
+  {
+    "file": "docs/API.md",
+    "bytes": 5981,
+    "lines": 96,
+    "sha256": "55f66ae5c3b1f74b4f60dda476eb533f9f6d3ff2aded7962747162895defb042"
+  },
+  {
+    "file": "docs/vendor/AIOGRAM.md",
+    "bytes": 2622,
+    "lines": 40,
+    "sha256": "6b8e24c9b3f5a03f08f8bcc24ab37b4e78867ea0fa0bd4413ba5c67b4fa11017"
+  },
+  {
+    "file": "docs/vendor/ALIBABA.md",
+    "bytes": 5976,
+    "lines": 65,
+    "sha256": "4442cbcc36ae6085b669c37c8279609d6724adeb65fc904006f5ad7e9deb323d"
+  },
+  {
+    "file": "docs/vendor/GEMINI.md",
+    "bytes": 5630,
+    "lines": 60,
+    "sha256": "5daedbb494e393b9e24bb52341d561ac2beddcfa2d202ec2d44781cc929dc3a5"
+  },
+  {
+    "file": "docs/vendor/SEARCH_BACKENDS.md",
+    "bytes": 5056,
+    "lines": 52,
+    "sha256": "2f4bdc82b8883c95a5239aa29a3c080324557474c798064f20284a15c55456b7"
+  },
+  {
+    "file": "docs/vendor/TELEGRAM_BOT_API.md",
+    "bytes": 3744,
+    "lines": 42,
+    "sha256": "4188ea56809881578b8ed2039a6dee618763306f7a04531ea9a70df1ce891686"
+  },
+  {
+    "file": "docs/vendor/TELEGRAM_MINI_APPS.md",
+    "bytes": 2975,
+    "lines": 46,
+    "sha256": "aa412655a57eec38ae28e261e7ddfc7d35d52228554003936247770ea0c35bd9"
+  },
+  {
+    "file": "miniapp/.gitignore",
+    "bytes": 28,
+    "lines": 3,
+    "sha256": "d7aa963f7f0eb1272e445752499d95e81a0db9603c739962bf1448d851479977"
+  },
+  {
+    "file": "miniapp/index.html",
+    "bytes": 444,
+    "lines": 16,
+    "sha256": "d62855bfd74e597e330583d27731e29fde737ca74b9755f40b87a15d17b3ef18"
+  },
+  {
+    "file": "miniapp/package-lock.json",
+    "bytes": 61702,
+    "lines": 1861,
+    "sha256": "3ef6857dd34a155a0fbb36497df2fdb205119534fa23462ade0dba0a7b3cc56e"
+  },
+  {
+    "file": "miniapp/package.json",
+    "bytes": 561,
+    "lines": 25,
+    "sha256": "6a08170fad5d217071c410474edac91ed055ee72fb193ff45aead0f09dbef017"
+  },
+  {
+    "file": "miniapp/src/App.tsx",
+    "bytes": 5243,
+    "lines": 155,
+    "sha256": "53e6131e5f2583e02f0aa8886abd3fed02b29244be6464dadb4581018b915919"
+  },
+  {
+    "file": "miniapp/src/admin/AdminAuditPage.tsx",
+    "bytes": 2437,
+    "lines": 83,
+    "sha256": "877ff80262a52efcf17ca48860b898c85059e7d542d8592f352bb6a062fd4662"
+  },
+  {
+    "file": "miniapp/src/admin/AdminDashboardPage.tsx",
+    "bytes": 2682,
+    "lines": 75,
+    "sha256": "07514d1213468492e68d226653c9a60aabac8d79c94f74624b0646fb54e520de"
+  },
+  {
+    "file": "miniapp/src/admin/AdminGeminiPage.tsx",
+    "bytes": 11709,
+    "lines": 347,
+    "sha256": "bd1250fac5da5d738e402cc952c268836d80dd9cc42df73d7527bb777a084707"
+  },
+  {
+    "file": "miniapp/src/admin/AdminLayout.tsx",
+    "bytes": 1142,
+    "lines": 36,
+    "sha256": "84338095bf01832306ad200570b148f8f81374473f06c6274332d8e2d3ec2d4b"
+  },
+  {
+    "file": "miniapp/src/admin/AdminProvidersPage.tsx",
+    "bytes": 3045,
+    "lines": 99,
+    "sha256": "ba12e27e18af3006755e36dd3121cad80ed309780b433b4e5d890b9e946a1da1"
+  },
+  {
+    "file": "miniapp/src/admin/AdminSearchPage.tsx",
+    "bytes": 5503,
+    "lines": 167,
+    "sha256": "9e3714c22fe0cfc3dc8c3db89a5d64bf4869aa8e5c56c1f0f0c01e2dc6387cc9"
+  },
+  {
+    "file": "miniapp/src/admin/AdminSystemPage.tsx",
+    "bytes": 5434,
+    "lines": 147,
+    "sha256": "c12311347287f1f7fa29c935160874516e3638ddd65b03c30e79c557754e76cb"
+  },
+  {
+    "file": "miniapp/src/admin/AdminUsersPage.tsx",
+    "bytes": 17192,
+    "lines": 481,
+    "sha256": "6337807cedff0d2ffe1b4674fff864f2ecaf23d6f8e072e7c41c0a18c248e59f"
+  },
+  {
+    "file": "miniapp/src/api/auth.tsx",
+    "bytes": 3444,
+    "lines": 105,
+    "sha256": "0ccee461ee70e5c698959231f2379335c21475afdcc72317039d1f3d095be87b"
+  },
+  {
+    "file": "miniapp/src/api/client.ts",
+    "bytes": 4095,
+    "lines": 126,
+    "sha256": "b8c3acd9b537d07bba24127186e1416ea01d51543fcd8493eaea63dad0c88d1d"
+  },
+  {
+    "file": "miniapp/src/api/hooks.ts",
+    "bytes": 3223,
+    "lines": 114,
+    "sha256": "46ccd70b3396a2f111d8bd9aee95695a1d8eddebcd7fce62324f00e3a8d0aad8"
+  },
+  {
+    "file": "miniapp/src/api/types.ts",
+    "bytes": 4994,
+    "lines": 230,
+    "sha256": "6c79d5f74a0f57cc0b038223f6bf0648049f29214a4c09a6e769b90a4f18d650"
+  },
+  {
+    "file": "miniapp/src/components/Button.tsx",
+    "bytes": 710,
+    "lines": 28,
+    "sha256": "1d3a733010396b9b51834a44b807cb518b1327b2adc1d14c2f19011555f32d64"
+  },
+  {
+    "file": "miniapp/src/components/ChatSettingsForm.tsx",
+    "bytes": 3929,
+    "lines": 100,
+    "sha256": "17b4cbef33b553e2e443339076d34f0f479122876efe05ce5986f15fd3553688"
+  },
+  {
+    "file": "miniapp/src/components/Chip.tsx",
+    "bytes": 333,
+    "lines": 12,
+    "sha256": "0bbe98359a5d9c7c46f32813fe4f3bc0ee2fc04492aa4c51345180bac8fcfed3"
+  },
+  {
+    "file": "miniapp/src/components/ConfirmDialog.tsx",
+    "bytes": 986,
+    "lines": 41,
+    "sha256": "8ca2fcf4de814abd522c471ba8d34e327903cb553b2eda38301b553ef2b23a29"
+  },
+  {
+    "file": "miniapp/src/components/EmptyState.tsx",
+    "bytes": 357,
+    "lines": 17,
+    "sha256": "fb918b29cb522ca9739f5778434200664338c1799ad2fb1001f805d52fbb5efa"
+  },
+  {
+    "file": "miniapp/src/components/Input.tsx",
+    "bytes": 507,
+    "lines": 11,
+    "sha256": "d286423a206c68e622cace6ffc12ab6fb68716a103c0bec0c1547b002b4e574d"
+  },
+  {
+    "file": "miniapp/src/components/List.tsx",
+    "bytes": 989,
+    "lines": 39,
+    "sha256": "1f792139a27b8727af236aabf9dfcf9002d0f1a98d9348052ec1295677e21ccb"
+  },
+  {
+    "file": "miniapp/src/components/Modal.tsx",
+    "bytes": 1125,
+    "lines": 39,
+    "sha256": "57f754fe4c8f2e1da916051f3dbfb60bb61e8a9fe9b79e99612b9186ffce465d"
+  },
+  {
+    "file": "miniapp/src/components/Section.tsx",
+    "bytes": 569,
+    "lines": 18,
+    "sha256": "8ab03524ffec7ce3570ba0d44a2907634dd13ea812692bb0cc9739eb8b1a1405"
+  },
+  {
+    "file": "miniapp/src/components/Select.tsx",
+    "bytes": 570,
+    "lines": 28,
+    "sha256": "a929327caa5dd555c690b223510436a6478d5b9472c002dd3b9833ed181d8635"
+  },
+  {
+    "file": "miniapp/src/components/Spinner.tsx",
+    "bytes": 236,
+    "lines": 10,
+    "sha256": "148350375a9a132153c5f919a149948a530680034ccfe0165c2c3b76c7ecfaa1"
+  },
+  {
+    "file": "miniapp/src/components/Toggle.tsx",
+    "bytes": 521,
+    "lines": 21,
+    "sha256": "c957d233d9c81f153241a83c7daf9a50c4480926bb6bd34ca639d48fc246c589"
+  },
+  {
+    "file": "miniapp/src/components/index.ts",
+    "bytes": 519,
+    "lines": 13,
+    "sha256": "4469e665cdee2c10ca6e8ce3d76540bdbd7234358ea11aaeb737fd59627dd0cd"
+  },
+  {
+    "file": "miniapp/src/main.tsx",
+    "bytes": 407,
+    "lines": 14,
+    "sha256": "9a0f13ca9b0d978cfa8b7b22ed9f3717585ef9bb5da73656ba387d860b328bd4"
+  },
+  {
+    "file": "miniapp/src/pages/ChatSettingsPage.tsx",
+    "bytes": 5717,
+    "lines": 185,
+    "sha256": "4ad02a0ff03d65b2747cad31818e89809d18920902a483b03f1fd8cb369c5315"
+  },
+  {
+    "file": "miniapp/src/pages/ChatsPage.tsx",
+    "bytes": 8031,
+    "lines": 252,
+    "sha256": "cfb4a5f3b4583bd8b2b38bc780fe733f224650107d4c74df6096f5db48a7bb1a"
+  },
+  {
+    "file": "miniapp/src/pages/HomePage.tsx",
+    "bytes": 3324,
+    "lines": 93,
+    "sha256": "1d9395dcc460a2cbc9df2ec38b3f3170f43b893e5efc60e0efc89b21b9cc7671"
+  },
+  {
+    "file": "miniapp/src/pages/MemoryPage.tsx",
+    "bytes": 6177,
+    "lines": 185,
+    "sha256": "4892ea4d0cb7f53f42c41e085127c366279a2aa42510c3375b69c6f33becffba"
+  },
+  {
+    "file": "miniapp/src/pages/SettingsPage.tsx",
+    "bytes": 5467,
+    "lines": 148,
+    "sha256": "001884bb73fa6adecf4f7ae453b804bd5ff50c3e548228395662bfa29cb0b74b"
+  },
+  {
+    "file": "miniapp/src/styles.css",
+    "bytes": 12193,
+    "lines": 737,
+    "sha256": "98e4d3b46fde349cbc17a05d9fdca60d1f1d84fe34240fcb4809dda52dd2fb0f"
+  },
+  {
+    "file": "miniapp/src/telegram/telegram-web-app.d.ts",
+    "bytes": 1801,
+    "lines": 62,
+    "sha256": "5418e36da63d5b628718e3fd227182288e598e7e127ccdabe7d071bbb1609ad8"
+  },
+  {
+    "file": "miniapp/src/telegram/webapp.ts",
+    "bytes": 2759,
+    "lines": 88,
+    "sha256": "97215d7af32db9f4b534e3f6e70567d470cc4213bd4c5ccb96cfd524b08225c6"
+  },
+  {
+    "file": "miniapp/src/utils.ts",
+    "bytes": 3151,
+    "lines": 99,
+    "sha256": "f279d2d5a4b08f1dc9b82d33a9672ef395733162f48278fb391836848fa5f8e5"
+  },
+  {
+    "file": "miniapp/tsconfig.json",
+    "bytes": 519,
+    "lines": 23,
+    "sha256": "5fc8ad5c69549053fa63a3abfee7f8f925fed6a2f2277bfa15563187819e3e87"
+  },
+  {
+    "file": "miniapp/vite.config.ts",
+    "bytes": 317,
+    "lines": 18,
+    "sha256": "cbfa30dc9ac260716dbc6b3765003a2a257aa0eb56157b8159c3f7f11756de8d"
+  },
+  {
+    "file": "pyproject.toml",
+    "bytes": 1778,
+    "lines": 69,
+    "sha256": "b6a7c7b661340c586356bfcc1d2556d3a05afe9ad280fe91738eca8adcc9199b"
+  },
+  {
+    "file": "scripts/import_gemini_keys.py",
+    "bytes": 4386,
+    "lines": 102,
+    "sha256": "bdc3cf50bbd773bd1ab914ffc3d45e8699111cf43fd98d16240033c43aa0e161"
+  },
+  {
+    "file": "scripts/smoke_providers.py",
+    "bytes": 30021,
+    "lines": 697,
+    "sha256": "aa44dcbf41ebe95d05eb76dd0dc4878de7e6f34ff4149ebbb8fc81403984c9ad"
+  },
+  {
+    "file": "tests/__init__.py",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "tests/unit/__init__.py",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "tests/unit/test_access.py",
+    "bytes": 9138,
+    "lines": 326,
+    "sha256": "76f37ce33e0c2ac3fc170132a9cd42a6f450d92d670ea46a48a032d4d8c37100"
+  },
+  {
+    "file": "tests/unit/test_alibaba_provider.py",
+    "bytes": 11793,
+    "lines": 362,
+    "sha256": "4558d26241beeb56bcd4fb7299ed8ba297aa826cce598a5c4e5ee1e9badc3488"
+  },
+  {
+    "file": "tests/unit/test_api.py",
+    "bytes": 7506,
+    "lines": 207,
+    "sha256": "86f014d8e23c7b46d0fcbf4a26855b41c496446eec24a29372d91bcf5b1e50c8"
+  },
+  {
+    "file": "tests/unit/test_api_auth.py",
+    "bytes": 5282,
+    "lines": 138,
+    "sha256": "48c12f324802ca47a4498cb8e0921bb1a8b0a91f6795bcbf8a2a67385d00d9ee"
+  },
+  {
+    "file": "tests/unit/test_bot_helpers.py",
+    "bytes": 942,
+    "lines": 29,
+    "sha256": "07cb83a766ab49648c12c5bbb60c379f12b0846d772d343fc0a65983d51b218a"
+  },
+  {
+    "file": "tests/unit/test_bot_wiring.py",
+    "bytes": 2722,
+    "lines": 77,
+    "sha256": "76ba7c2ec3bb26039f659c1891549b0e1994a39c7fae9313deaf739fddd22dbc"
+  },
+  {
+    "file": "tests/unit/test_compactor.py",
+    "bytes": 13170,
+    "lines": 365,
+    "sha256": "043ea6c5296d866cdab01c8ebf1c85b515e2477a69e0a3d287dfd98a690f334c"
+  },
+  {
+    "file": "tests/unit/test_context.py",
+    "bytes": 8395,
+    "lines": 219,
+    "sha256": "ca838abf67f4634141a3f835d42acca4941cde7cbbae8a507c3002221373ecce"
+  },
+  {
+    "file": "tests/unit/test_crypto.py",
+    "bytes": 1324,
+    "lines": 46,
+    "sha256": "78406764510e11ed666745231a174eec7c5ab807d885839ac9013fd5e174de3f"
+  },
+  {
+    "file": "tests/unit/test_draft_streamer.py",
+    "bytes": 11497,
+    "lines": 297,
+    "sha256": "9d89897805a92e736a128d2fc19cff8ec50c1f12012f5a7845d326ad576d43d1"
+  },
+  {
+    "file": "tests/unit/test_gemini_pool.py",
+    "bytes": 18036,
+    "lines": 471,
+    "sha256": "09ff9923d6756594d47e0be5ef489ddfabb22fb25b4bc33736b27d43fbdd2267"
+  },
+  {
+    "file": "tests/unit/test_gemini_provider.py",
+    "bytes": 13522,
+    "lines": 389,
+    "sha256": "68c61696a272a9caeb877f1f5b9cb75abe160b215dad14e9979d1a6e94741ade"
+  },
+  {
+    "file": "tests/unit/test_generation.py",
+    "bytes": 20992,
+    "lines": 600,
+    "sha256": "d1684fef73f6e0a7a304c066d2c86f5fee45817bd5b6e3f6b41c5de636c0836d"
+  },
+  {
+    "file": "tests/unit/test_memory.py",
+    "bytes": 18973,
+    "lines": 519,
+    "sha256": "bbf73e25669ce0d0327c24a74aed59a79e67c03a2744f431de61db521344cd81"
+  },
+  {
+    "file": "tests/unit/test_registry.py",
+    "bytes": 2136,
+    "lines": 59,
+    "sha256": "60591c69c7bb2f2f4df6ff6fbb12f036d3da91c0465f824f6a455f9648a552c4"
+  },
+  {
+    "file": "tests/unit/test_search.py",
+    "bytes": 22389,
+    "lines": 605,
+    "sha256": "9442887998f553b999a87e8c78bee379f09ddd32b22efe067a8f5d80d311af69"
+  },
+  {
+    "file": "tests/unit/test_ssrf.py",
+    "bytes": 2943,
+    "lines": 93,
+    "sha256": "55584c63ab4fa890ff853d8acd804d9c401bfdb5d9143205d5182a86f9d28b9e"
+  },
+  {
+    "file": "tests/unit/test_tools.py",
+    "bytes": 26119,
+    "lines": 652,
+    "sha256": "283cd99d2febaba316e50a0e0362118edc5c182ab492e97f4033c5ee8cd8d0f7"
+  }
+]

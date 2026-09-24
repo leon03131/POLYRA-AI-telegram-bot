@@ -44,6 +44,9 @@ class ToolContext:
     settings: Settings
     search_manager: Any | None = None  # SearchManager (app.search не импортируем)
     jina_reader: Any | None = None
+    # Effective tools на запрос (контракт FIX_V2 §4, A12): None = прежнее поведение
+    # (только permissions); иначе инструмент вне набора → denied БЕЗ выполнения.
+    allowed_tool_names: frozenset[str] | None = None
 
 
 def has_permission(permissions: EffectivePermissions, required: str | None) -> bool:

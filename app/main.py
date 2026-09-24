@@ -9,6 +9,7 @@ from app.api.app import create_app
 from app.bot.dispatcher import create_bot, create_dispatcher, setup_bot_commands
 from app.config import get_settings
 from app.context import ContextBuilder, ContextCompactor, TitleGenerator, TokenBudgetManager
+from app.db.repositories import GenerationRunRepository
 from app.db.session import create_engine_from_url, make_session_factory
 from app.llm.registry import default_registry
 from app.llm.tools.builtin import build_default_registry
@@ -69,6 +70,7 @@ async def main() -> None:
         memory_model=settings.memory_model,
         memory_thinking=settings.memory_thinking,
         dedup_threshold=settings.memory_dedup_threshold,
+        min_chars=settings.memory_extraction_min_chars,
     )
     search_manager = SearchManager(session_factory=session_factory, crypto=crypto)
     tool_registry = build_default_registry()
@@ -98,6 +100,8 @@ async def main() -> None:
         session_factory=session_factory,
         crypto=crypto,
         registry=registry,
+        generation_registry=generation_registry,
+        search_manager=search_manager,
     )
     uvicorn_config = uvicorn.Config(
         api,
@@ -107,8 +111,16 @@ async def main() -> None:
         access_log=False,
     )
     uvicorn_server = uvicorn.Server(uvicorn_config)
+    # A34: recovery stale runs предыдущего процесса (queued/running → aborted).
+    async with session_factory() as session:
+        aborted = await GenerationRunRepository(session).abort_stale()
+        await session.commit()
+        if aborted:
+            logger.warning("startup recovery: %s stale generation runs → aborted", aborted)
+
     try:
-        await bot.delete_webhook(drop_pending_updates=True)
+        # A34: pending updates НЕ выбрасываем (история Telegram переживает рестарт).
+        await bot.delete_webhook(drop_pending_updates=False)
         await setup_bot_commands(bot)
         logger.info(
             "bot started (long polling); mini app api on %s:%s",
@@ -117,6 +129,9 @@ async def main() -> None:
         )
         await asyncio.gather(dp.start_polling(bot), uvicorn_server.serve())
     finally:
+        # A30/A34: закрыть все транспорты ровно один раз (bot, LLM, search, DB).
+        await llm_stream.aclose()
+        await search_manager.aclose()
         await bot.session.close()
         await engine.dispose()
 

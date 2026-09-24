@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_SOURCE_CHARS = 2000
 _MAX_CANDIDATES = 10
+_MAX_CANDIDATE_CHARS = 500
 _EXISTING_SCAN_LIMIT = 200
 _VALID_CATEGORIES = frozenset({"preference", "project", "fact", "instruction", "other"})
 
@@ -82,7 +83,7 @@ def parse_candidates(data: dict[str, Any] | None) -> list[MemoryCandidate]:
             importance = 5
         candidates.append(
             MemoryCandidate(
-                text=text.strip(),
+                text=text.strip()[:_MAX_CANDIDATE_CHARS],
                 category=str(category),
                 importance=min(10, max(1, importance)),
             )

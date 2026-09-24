@@ -2,9 +2,11 @@
 
 import uuid
 from datetime import UTC, date, datetime
+from typing import Any, cast
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import GeminiProject, QuotaDailyUsage, QuotaMinuteUsage, QuotaPolicy
@@ -304,3 +306,66 @@ class QuotaUsageRepository:
         )
         await self._session.execute(minute_stmt)
         await self._session.execute(daily_stmt)
+
+    async def list_recent_minute(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        """Последние минутные окна с именем проекта (свежие первыми), admin-просмотр."""
+        stmt = (
+            select(
+                GeminiProject.name,
+                QuotaMinuteUsage.model_id,
+                QuotaMinuteUsage.minute_ts,
+                QuotaMinuteUsage.requests_count,
+                QuotaMinuteUsage.tokens_in,
+            )
+            .join(GeminiProject, QuotaMinuteUsage.project_id == GeminiProject.id)
+            .order_by(QuotaMinuteUsage.minute_ts.desc())
+            .limit(limit)
+        )
+        result = await self._session.execute(stmt)
+        return [
+            {
+                "project_name": row.name,
+                "model_id": row.model_id,
+                "minute_ts": row.minute_ts,
+                "requests_count": row.requests_count,
+                "tokens_in": row.tokens_in,
+            }
+            for row in result.all()
+        ]
+
+    async def list_recent_daily(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        """Последние дневные окна с именем проекта (свежие первыми), admin-просмотр."""
+        stmt = (
+            select(
+                GeminiProject.name,
+                QuotaDailyUsage.model_id,
+                QuotaDailyUsage.day,
+                QuotaDailyUsage.requests_count,
+                QuotaDailyUsage.tokens_in,
+            )
+            .join(GeminiProject, QuotaDailyUsage.project_id == GeminiProject.id)
+            .order_by(QuotaDailyUsage.day.desc())
+            .limit(limit)
+        )
+        result = await self._session.execute(stmt)
+        return [
+            {
+                "project_name": row.name,
+                "model_id": row.model_id,
+                "day": row.day,
+                "requests_count": row.requests_count,
+                "tokens_in": row.tokens_in,
+            }
+            for row in result.all()
+        ]
+
+    async def delete_all(self) -> tuple[int, int]:
+        """Удалить все строки минутного и дневного учёта; вернуть (minute, daily)."""
+        minute_result = cast(
+            "CursorResult[Any]", await self._session.execute(delete(QuotaMinuteUsage))
+        )
+        daily_result = cast(
+            "CursorResult[Any]", await self._session.execute(delete(QuotaDailyUsage))
+        )
+        await self._session.flush()
+        return (int(minute_result.rowcount or 0), int(daily_result.rowcount or 0))

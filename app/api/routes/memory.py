@@ -3,7 +3,7 @@
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.api.dependencies import CurrentUserDep, SessionDep
@@ -12,6 +12,8 @@ from app.db.repositories import MemoryRepository
 from app.memory.normalizer import normalize_memory_text
 
 router = APIRouter()
+
+_MAX_LIMIT = 200
 
 
 class MemoryPatchRequest(BaseModel):
@@ -34,11 +36,19 @@ def _memory_out(memory: Memory) -> dict[str, Any]:
 
 
 @router.get("/memory")
-async def list_memories(current: CurrentUserDep, session: SessionDep) -> dict[str, Any]:
-    """Память пользователя: важность desc, затем свежесть."""
+async def list_memories(
+    current: CurrentUserDep,
+    session: SessionDep,
+    limit: int = Query(default=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    """Память пользователя (важность desc, затем свежесть) с пагинацией."""
     user, _ = current
-    memories = await MemoryRepository(session).list_for_user(user.id)
-    return {"memories": [_memory_out(memory) for memory in memories]}
+    limit = max(1, min(limit, _MAX_LIMIT))
+    repo = MemoryRepository(session)
+    memories = await repo.list_for_user(user.id, limit=limit, offset=offset)
+    total = await repo.count_for_user(user.id)
+    return {"memories": [_memory_out(memory) for memory in memories], "total": total}
 
 
 @router.patch("/memory/{memory_id}")

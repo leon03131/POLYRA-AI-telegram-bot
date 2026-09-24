@@ -94,3 +94,40 @@
   healthy}, tool_calls_today: int}`
 - `GET /api/admin/audit?limit=50` → `{entries: [{id, actor_telegram_id, action, target_type,
   target_id, metadata, created_at}]}`
+
+## V2 additions (2026-09-24, FIX pass)
+
+### Chats (user)
+- `GET /api/chats?limit=50&offset=0&include_archived=false` → `{chats: [...], total: int}`;
+  объект chat дополнительно содержит `system_prompt_override: string | null`.
+- `GET /api/chats/{id}` → `{chat}` (404 для чужого).
+
+### Admin models
+- `GET /api/admin/models` → `{models: [{model_id, display_name, provider, enabled,
+  internal_only, supports_images, thinking_modes, default_thinking, max_context, max_output}]}`
+  (enabled — effective: registry default ∪ DB override `model_overrides`).
+- `PUT /api/admin/models/{model_id}` `{enabled: bool}` → `{ok}` (audit).
+
+### Admin Gemini pool extras
+- `POST /api/admin/gemini/projects/{id}/test` → дешёвый реальный вызов (gemini-3.5-flash-lite,
+  ≤16 output tokens) → `{ok: bool, latency_ms: int, error: string | null}` (audit).
+- `POST /api/admin/gemini/reset-counters` → `{ok, deleted: int}` (чистит quota_minute_usage/
+  quota_daily_usage; audit).
+- `GET /api/admin/gemini/usage` → `{minute: [{project_name, model_id, minute_ts, requests_count,
+  tokens_in}], daily: [{project_name, model_id, day, requests_count, tokens_in}]}` (последние 50).
+
+### Admin Alibaba
+- `POST /api/admin/providers/alibaba/smoke` → дешёвый реальный вызов (qwen3.8-flash,
+  ≤16 output tokens) → `{ok, latency_ms, error}` (audit).
+
+### Admin memory
+- `GET /api/admin/memory?telegram_user_id=<int>&limit=50&offset=0` → `{memories: [...], total: int}`
+  (owner читает любого пользователя; без telegram_user_id — все).
+
+### Audit pagination
+- `GET /api/admin/audit?limit=50&offset=0&action=<str?>` → `{entries: [...], total: int}`.
+
+### Stats extras
+- `GET /api/admin/stats` добавляет: `requests_by_model_today: {model_id: int}`,
+  `errors_today: int`, `rate_limit_429_today: int`, `gemini_usage_today:
+  [{project_name, requests, tokens_in}]`.

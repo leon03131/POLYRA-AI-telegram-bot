@@ -12,6 +12,7 @@ request.metadata["api_key"] (ADR-015) — провайдер остаётся st
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import inspect
 import logging
@@ -23,7 +24,7 @@ from uuid import UUID
 
 from app.llm.base import LLMRequest
 from app.llm.errors import ErrorCategory, ProviderError
-from app.llm.events import LLMEvent, Usage
+from app.llm.events import Done, LLMEvent, Usage
 from app.llm.gemini.quota import QuotaTracker
 from app.llm.providers.gemini import GeminiProvider
 
@@ -210,24 +211,16 @@ class GeminiProjectPool:
             cred = await self.acquire(request.model, exclude=tried, now=now_fn())
             if cred is None:
                 raise PoolExhaustedError(request.model)
+            self._record_attempt(request, cred)
             req2 = dataclasses.replace(
                 request, metadata={**request.metadata, "api_key": cred.api_key}
             )
             events_started = False
-            last_usage: Usage | None = None
             try:
-                async for event in provider.stream_chat(req2):
+                async for event in self._stream_attempt(provider, req2, request, cred, now_fn):
                     events_started = True
-                    if isinstance(event, Usage):
-                        last_usage = event
                     yield event
-                await self.report_success(
-                    cred.project_id,
-                    request.model,
-                    input_tokens=last_usage.input_tokens if last_usage else None,
-                    now=now_fn(),
-                )
-                return
+                return  # стрим дошёл до конца — успех
             except asyncio.CancelledError:
                 raise
             except ProviderError as e:
@@ -235,10 +228,52 @@ class GeminiProjectPool:
                 if e.category in (ErrorCategory.INVALID_REQUEST, ErrorCategory.SAFETY):
                     raise
                 if events_started:
-                    raise
+                    raise  # partial stream не перезапускаем (N03)
                 logger.warning(
                     "gemini pool: проект %s дал %s — ротация на следующий",
                     cred.name,
                     e.category,
                 )
                 tried.add(cred.project_id)
+
+    @staticmethod
+    def _record_attempt(request: LLMRequest, cred: PooledCredential) -> None:
+        """Записать попытку в metadata["attempts"]/["attempt_ids"] (если переданы)."""
+        attempts = request.metadata.get("attempts")
+        if isinstance(attempts, list):
+            attempts.append(cred.name)
+        attempt_ids = request.metadata.get("attempt_ids")
+        if isinstance(attempt_ids, list):
+            attempt_ids.append(str(cred.project_id))
+
+    async def _stream_attempt(
+        self,
+        provider: GeminiProvider,
+        req2: LLMRequest,
+        request: LLMRequest,
+        cred: PooledCredential,
+        now_fn: Callable[[], datetime],
+    ) -> AsyncIterator[LLMEvent]:
+        """Одна попытка стрима; успех (в т.ч. ранний уход после Done) → report_success.
+
+        Ошибки ProviderError пробрасываются наверх для обработки ротации.
+        """
+        terminal_seen = False
+        last_usage: Usage | None = None
+        try:
+            async for event in provider.stream_chat(req2):
+                if isinstance(event, Usage):
+                    last_usage = event
+                if isinstance(event, Done):
+                    terminal_seen = True
+                yield event
+        finally:
+            # Нормальный конец ИЛИ потребитель ушёл после Done (break) — успех.
+            if terminal_seen:
+                with contextlib.suppress(Exception):
+                    await self.report_success(
+                        cred.project_id,
+                        request.model,
+                        input_tokens=last_usage.input_tokens if last_usage else None,
+                        now=now_fn(),
+                    )

@@ -4,6 +4,13 @@ Session factory здесь "сломанная" (RuntimeError при откры�
 только пути, которые либо не требуют БД, либо должны вернуть 500 без traceback.
 DB-backed интеграционные тесты (реальная PostgreSQL) — отдельный прогон,
 включаемый через RUN_API_INTEGRATION=1 (не часть unit-набора).
+
+FIX V2 (2026-09-24): owner-gate numeric-only (A04), пагинация chats/memory,
+audit offset/action, новые admin-роуты (models/memory/gemini usage & counters/
+alibaba smoke) — здесь проверяется только регистрация роутов и gate (500 = gate
+пройден, БД сломана; 403 = gate отклонил). Бизнес-логика за ними — integration.
+Чистая логика сервисов (credentials A14, effective system settings A13) —
+через monkeypatch репозиториев, без БД.
 """
 
 from __future__ import annotations
@@ -11,9 +18,13 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import uuid
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from typing import Any
 from urllib.parse import urlencode
 
+import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
@@ -23,6 +34,8 @@ from app.config import Settings
 from app.db.models import User
 from app.llm.registry import default_registry
 from app.security.crypto import CryptoBox
+from app.services import credentials as credentials_service
+from app.services import settings as settings_service
 from app.services.access import GrantView, evaluate_access
 
 BOT_TOKEN = "123:abc"
@@ -39,7 +52,7 @@ class _BrokenSessionFactory:
 
 def _make_app() -> FastAPI:
     settings = Settings(
-        _env_file=None,  # type: ignore[call-arg]  # hermetic: не читать реальный .env
+        _env_file=None,  # hermetic: не читать реальный .env
         bot_token=BOT_TOKEN,
         owner_telegram_id=OWNER_TG_ID,
         master_encryption_key=MASTER_KEY,
@@ -137,8 +150,7 @@ async def test_admin_without_authorization_401() -> None:
 # --- через dependency_overrides (без БД) -----------------------------------------
 
 
-def _override_user(app: FastAPI, *, is_owner: bool) -> None:
-    user = _fake_user(is_owner=is_owner)
+def _make_permissions(is_owner: bool) -> Any:
     grant = GrantView(
         status="active",
         expires_at=None,
@@ -148,14 +160,21 @@ def _override_user(app: FastAPI, *, is_owner: bool) -> None:
         can_use_web_search=True,
         can_use_memory=True,
     )
-    permissions = evaluate_access(
+    return evaluate_access(
         is_owner=is_owner,
         user_status="active",
         grant=grant,
         allowed_models=None,
         now=datetime.now(UTC),
     )
-    app.dependency_overrides[get_current_user] = lambda: (user, permissions)
+
+
+def _override_user(app: FastAPI, *, is_owner: bool, user: User | None = None) -> User:
+    """Подменить get_current_user; возвращает подставного пользователя."""
+    if user is None:
+        user = _fake_user(is_owner=is_owner)
+    app.dependency_overrides[get_current_user] = lambda: (user, _make_permissions(is_owner))
+    return user
 
 
 async def test_me_serialization_with_override() -> None:
@@ -205,3 +224,277 @@ async def test_admin_forbidden_for_non_owner() -> None:
     async with _client(app) as client:
         response = await client.get("/api/admin/users")
     assert response.status_code == 403
+
+
+# --- A04: owner identity — только numeric telegram_user_id ---------------------
+
+
+async def test_require_owner_ignores_stale_is_owner_flag() -> None:
+    """is_owner=True в БД без совпадения numeric id НЕ даёт admin-доступ (stale privilege)."""
+    app = _make_app()
+    user = _fake_user(is_owner=False)  # telegram_user_id=111 != OWNER_TG_ID
+    user.is_owner = True  # stale флаг (например, после смены OWNER_TELEGRAM_ID)
+    assert user.telegram_user_id != OWNER_TG_ID
+    _override_user(app, is_owner=False, user=user)
+    async with _client(app) as client:
+        response = await client.get("/api/admin/users")
+    assert response.status_code == 403
+
+
+async def test_require_owner_numeric_id_passes_without_db_flag() -> None:
+    """numeric id совпадает, флаг is_owner=False — gate проходит (500 = упал на БД, не на gate)."""
+    app = _make_app()
+    user = _fake_user(is_owner=True)  # telegram_user_id == OWNER_TG_ID
+    user.is_owner = False  # флаг не выставлен — не важен для gate
+    _override_user(app, is_owner=True, user=user)
+    async with _client(app) as client:
+        response = await client.get("/api/admin/users")
+    assert response.status_code == 500  # owner-gate пройден, БД сломана
+    assert response.json() == {"detail": "internal error"}
+
+
+async def test_me_is_owner_ignores_stale_db_flag() -> None:
+    """GET /api/me: is_owner вычисляется по numeric id, а не по флагу БД."""
+    app = _make_app()
+    user = _fake_user(is_owner=False)
+    user.is_owner = True  # stale флаг
+    _override_user(app, is_owner=False, user=user)
+    async with _client(app) as client:
+        response = await client.get("/api/me")
+    assert response.status_code == 200
+    assert response.json()["is_owner"] is False
+
+
+# --- V2: регистрация новых admin-роутов и owner-gate ----------------------------
+
+_ADMIN_V2_ENDPOINTS = [
+    ("GET", "/api/admin/models"),
+    ("GET", "/api/admin/memory?telegram_user_id=111&limit=5&offset=0"),
+    ("GET", "/api/admin/gemini/usage"),
+    ("POST", "/api/admin/gemini/reset-counters"),
+    ("POST", "/api/admin/providers/alibaba/smoke"),
+    ("GET", "/api/admin/audit?limit=10&offset=5&action=access_granted"),
+]
+
+
+@pytest.mark.parametrize("method,path", _ADMIN_V2_ENDPOINTS)
+async def test_admin_v2_routes_forbidden_for_non_owner(method: str, path: str) -> None:
+    app = _make_app()
+    _override_user(app, is_owner=False)
+    async with _client(app) as client:
+        response = await client.request(method, path)
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("method,path", _ADMIN_V2_ENDPOINTS)
+async def test_admin_v2_routes_registered_and_owner_gated(method: str, path: str) -> None:
+    """Owner проходит gate → 500 (сломанная БД), т.е. роут зарегистрирован и не 404."""
+    app = _make_app()
+    _override_user(app, is_owner=True)
+    async with _client(app) as client:
+        response = await client.request(method, path)
+    assert response.status_code == 500
+    assert response.json() == {"detail": "internal error"}
+
+
+# --- V2: сериализация чата (A01/A25) --------------------------------------------
+
+
+def test_chat_out_includes_system_prompt_override_and_string_id() -> None:
+    from app.api.routes.chats import _chat_out
+
+    chat = SimpleNamespace(
+        id=uuid.uuid4(),
+        title="t",
+        model_id="kimi-k3",
+        thinking_setting=None,
+        web_mode="auto",
+        memory_enabled=True,
+        system_prompt_override="Будь краток",
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        archived_at=None,
+    )
+    out = _chat_out(chat, current_chat_id=None)
+    assert isinstance(out["id"], str)
+    assert out["system_prompt_override"] == "Будь краток"
+    assert out["is_current"] is False
+
+
+# --- A14: credentials disabled = абсолютный запрет ------------------------------
+
+
+class _FakeCredentialRepository:
+    """Подмена ProviderCredentialRepository: фиксированная запись или None."""
+
+    def __init__(self, session: Any, credential: Any) -> None:
+        self._credential = credential
+
+    async def get(self, provider: str) -> Any:
+        return self._credential
+
+
+def _patch_credential_repo(monkeypatch: pytest.MonkeyPatch, credential: Any) -> None:
+    monkeypatch.setattr(
+        credentials_service,
+        "ProviderCredentialRepository",
+        lambda session: _FakeCredentialRepository(session, credential),
+    )
+
+
+_CRYPTO = CryptoBox(MASTER_KEY)
+
+
+async def test_credentials_absent_record_env_present_returns_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_credential_repo(monkeypatch, None)
+    key = await credentials_service.get_provider_api_key(None, _CRYPTO, "alibaba", "env-key")
+    assert key == "env-key"
+
+
+async def test_credentials_absent_record_env_absent_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_credential_repo(monkeypatch, None)
+    key = await credentials_service.get_provider_api_key(None, _CRYPTO, "alibaba", "")
+    assert key is None
+
+
+async def test_credentials_enabled_record_returns_db_key_ignoring_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cred = SimpleNamespace(enabled=True, encrypted_api_key=_CRYPTO.encrypt("db-key"))
+    _patch_credential_repo(monkeypatch, cred)
+    key = await credentials_service.get_provider_api_key(None, _CRYPTO, "alibaba", "env-key")
+    assert key == "db-key"
+
+
+async def test_credentials_enabled_record_without_env_returns_db_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cred = SimpleNamespace(enabled=True, encrypted_api_key=_CRYPTO.encrypt("db-key"))
+    _patch_credential_repo(monkeypatch, cred)
+    key = await credentials_service.get_provider_api_key(None, _CRYPTO, "alibaba", "")
+    assert key == "db-key"
+
+
+async def test_credentials_disabled_record_env_present_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Disabled credential — абсолютный запрет: env fallback НЕ применяется (A14)."""
+    cred = SimpleNamespace(enabled=False, encrypted_api_key=_CRYPTO.encrypt("db-key"))
+    _patch_credential_repo(monkeypatch, cred)
+    key = await credentials_service.get_provider_api_key(None, _CRYPTO, "alibaba", "env-key")
+    assert key is None
+
+
+async def test_credentials_disabled_record_env_absent_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cred = SimpleNamespace(enabled=False, encrypted_api_key=_CRYPTO.encrypt("db-key"))
+    _patch_credential_repo(monkeypatch, cred)
+    key = await credentials_service.get_provider_api_key(None, _CRYPTO, "alibaba", "")
+    assert key is None
+
+
+# --- A13: effective system settings (DB override → env fallback + валидация) -----
+
+
+class _FakeSystemSettingRepository:
+    """Подмена SystemSettingRepository: фиксированный dict."""
+
+    def __init__(self, session: Any, stored: dict[str, Any]) -> None:
+        self._stored = stored
+
+    async def get_many(self, keys: Any) -> dict[str, Any]:
+        return {key: value for key, value in self._stored.items() if key in set(keys)}
+
+
+def _patch_system_settings_repo(monkeypatch: pytest.MonkeyPatch, stored: dict[str, Any]) -> None:
+    monkeypatch.setattr(
+        settings_service,
+        "SystemSettingRepository",
+        lambda session: _FakeSystemSettingRepository(session, stored),
+    )
+
+
+def _service_settings() -> Settings:
+    return Settings(
+        _env_file=None,
+        bot_token=BOT_TOKEN,
+        owner_telegram_id=OWNER_TG_ID,
+        master_encryption_key=MASTER_KEY,
+    )
+
+
+async def test_effective_settings_db_values_override_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_system_settings_repo(
+        monkeypatch,
+        {
+            "default_model": "kimi-k3",
+            "default_thinking": None,
+            "max_tool_iterations": 4,
+            "context_trigger_ratio": 0.5,
+            "memory_extraction_min_chars": 300,
+        },
+    )
+    env = _service_settings()
+    eff = await settings_service.get_effective_system_settings(None, env)
+    assert eff.default_model == "kimi-k3"
+    assert eff.default_thinking is None  # валидный explicit null в DB
+    assert eff.max_tool_iterations == 4
+    assert eff.context_trigger_ratio == 0.5
+    assert eff.memory_extraction_min_chars == 300
+    # незаданные ключи → env-дефолты
+    assert eff.default_system_prompt == env.default_system_prompt
+    assert eff.context_keep_recent == env.context_keep_recent
+    assert eff.memory_retrieval_limit == env.memory_retrieval_limit
+
+
+async def test_effective_settings_invalid_db_values_fall_back_to_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_system_settings_repo(
+        monkeypatch,
+        {
+            "default_model": "",  # пустая строка
+            "default_thinking": 123,  # не str/None
+            "default_system_prompt": 42,  # не str
+            "max_tool_iterations": 0,  # не > 0
+            "context_keep_recent": -3,
+            "context_trigger_ratio": 1.5,  # вне (0, 1)
+            "memory_retrieval_limit": "five",  # не int
+            "memory_extraction_min_chars": True,  # bool не считается int
+        },
+    )
+    env = _service_settings()
+    eff = await settings_service.get_effective_system_settings(None, env)
+    assert eff.default_model == env.default_model
+    assert eff.default_thinking is None
+    assert eff.default_system_prompt == env.default_system_prompt
+    assert eff.max_tool_iterations == env.max_tool_iterations
+    assert eff.context_keep_recent == env.context_keep_recent
+    assert eff.context_trigger_ratio == env.context_trigger_ratio
+    assert eff.memory_retrieval_limit == env.memory_retrieval_limit
+    assert eff.memory_extraction_min_chars == env.memory_extraction_min_chars
+
+
+async def test_effective_settings_empty_store_returns_env_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_system_settings_repo(monkeypatch, {})
+    env = _service_settings()
+    eff = await settings_service.get_effective_system_settings(None, env)
+    assert eff == settings_service.EffectiveSystemSettings(
+        default_model=env.default_model,
+        default_thinking=None,
+        default_system_prompt=env.default_system_prompt,
+        max_tool_iterations=env.max_tool_iterations,
+        context_keep_recent=env.context_keep_recent,
+        context_trigger_ratio=env.context_trigger_ratio,
+        memory_retrieval_limit=env.memory_retrieval_limit,
+        memory_extraction_min_chars=env.memory_extraction_min_chars,
+    )

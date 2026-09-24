@@ -7,10 +7,12 @@ CORS не нужен: Mini App ходит same-origin.
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api import routes
@@ -28,14 +30,20 @@ def create_app(
     session_factory: async_sessionmaker[AsyncSession],
     crypto: CryptoBox,
     registry: ModelRegistry,
+    generation_registry: Any | None = None,
+    search_manager: SearchManager | None = None,
 ) -> FastAPI:
-    """Собрать FastAPI-приложение: state, роутеры /api, /health, статика."""
+    """Собрать FastAPI-приложение: state, роутеры /api, /health, /ready, статика."""
     app = FastAPI(title="aibot Mini App API", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.settings = settings
     app.state.session_factory = session_factory
     app.state.crypto = crypto
     app.state.registry = registry
-    app.state.search_manager = SearchManager(session_factory=session_factory, crypto=crypto)
+    app.state.generation_registry = generation_registry
+    # Один SearchManager на процесс (lifecycle в main) — не плодим инстансы (A30).
+    app.state.search_manager = search_manager or SearchManager(
+        session_factory=session_factory, crypto=crypto
+    )
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -51,6 +59,8 @@ def create_app(
         routes.admin_users.router,
         routes.admin_access.router,
         routes.admin_gemini.router,
+        routes.admin_models.router,
+        routes.admin_memory.router,
         routes.admin_providers.router,
         routes.admin_search.router,
         routes.admin_system.router,
@@ -60,7 +70,19 @@ def create_app(
 
     @app.get("/health")
     async def health() -> dict[str, bool]:
+        """Liveness: процесс жив."""
         return {"ok": True}
+
+    @app.get("/ready")
+    async def ready(request: Request) -> JSONResponse:
+        """Readiness: БД отвечает (A37). 503 при недоступности зависимости."""
+        try:
+            async with session_factory() as session:
+                await session.execute(text("SELECT 1"))
+        except Exception:
+            logger.exception("readiness check failed")
+            return JSONResponse(status_code=503, content={"ready": False})
+        return JSONResponse(content={"ready": True})
 
     miniapp_dist = Path(settings.miniapp_dist)
     if miniapp_dist.is_dir():

@@ -63,3 +63,27 @@ UI-модель проекта: qwen3.8: OFF/LOW/MEDIUM/MAX; deepseek: OFF/LOW/H
 - Клиент: OpenAI Python SDK с `base_url` проекта + httpx `trust_env=false` (ADR-004); либо raw httpx при проблемах с extra_body/stream — решить при реализации M3.
 - Без proactive квот; реактивная обработка 429/5xx/timeout с bounded retry; ошибки маппим в user-facing сообщения.
 - Capability probe на каждую модель (acceptance thinking-параметров, images, FC, DTL) с кешем в provider_health.
+
+## Update 2026-09-24 — deepseek-v4-pro + снятие противоречия по thinking default
+
+Источники (проверено webfetch 2026-09-24, детали в `.agents/reports/fix-v2/polyra-alibaba/revalidate.md`):
+
+- `alibabacloud.com/help/en/model-studio/deepseek-v4-pro` — существует, Last Updated **Sep 20, 2026**.
+- `alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions` (chat-ref) — Sep 22, 2026.
+- `alibabacloud.com/help/en/model-studio/deep-thinking` — Sep 22, 2026.
+
+Факты по `deepseek-v4-pro` (стабильный ID; снапшот `deepseek-v4-pro-0813`):
+
+- **Text-only**: Input Modality = Text во всех регионах (Beijing/Singapore/Frankfurt/Virginia/Tokyo). Vision НЕТ.
+- **Ceilings**: Max Input 1 000 000; Context 1 000 000; **Max Output 393 216 (384K)**.
+- **Function Calling**: Supported (все регионы). Structured Outputs: Supported (кроме scope US в Virginia).
+- **Thinking**: hybrid; `enable_thinking` применим; **«DeepSeek-V4 series enables thinking by default»** (chat-ref) — у нас `default_thinking=None` = provider default ON.
+- **`reasoning_effort`**: стабильный ID в группе «DeepSeek-V4 and GLM series», default `high`; native значения **только `high` и `max`**; **`low` и `medium` — alias на `high`**, `xhigh` — alias на `max`. Поэтому в UI НИКАКИХ low/medium для Pro (отдельной кнопки LOW нет). Неподдерживаемые значения → ошибка 400.
+- **НЕ применимы к нему**: `thinking_budget` (список — qwen3.x/Qwen3-VL/Qwen3/GLM/Kimi except kimi-k3), `preserve_thinking` (только qwen3.x + kimi-k2.6/k2.7-code), `clear_thinking` (GLM-only). Не слать.
+- `max_completion_tokens` поддержан (DeepSeek-список включает `deepseek-v4-pro`); лимит — на сумму ответ+CoT.
+
+**Противоречие №1 снято**: ранее (research 2026-09-18) deep-thinking говорила «thinking disabled by default» для DeepSeek-V4, chat-ref — «enabled». Страница deep-thinking обновлена (2026-09-22): «DeepSeek — Hybrid thinking mode, **thinking mode enabled by default**: deepseek-v4.1-flash, **deepseek-v4-pro**, deepseek-v4-flash». Обе страницы согласованы: **thinking ON by default**.
+
+Остаточный doc-gap (не блокер): у стабильного ID на странице нет отдельных строк «(Thinking Mode)»/«Max Chain-of-Thought» — они есть у снапшота `-0813` (input 1M / output 393 216 / CoT 393 216). У `-0813` сохраняется внутреннее противоречие страницы: заголовок «Default value: high», а в списке значений «`max` (default)» — на стабильный ID не влияет.
+
+Маппинг UI-уровней для `deepseek-v4-pro`: OFF → `enable_thinking:false`; HIGH → `reasoning_effort:"high"`; MAX → `reasoning_effort:"max"`; default (не выбран) → без thinking-ключей. Acceptance OFF и реальный alias low→high — на runtime probe (`scripts/smoke_providers.py`, enumeration из registry).

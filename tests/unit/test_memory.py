@@ -304,6 +304,15 @@ def test_parse_candidates_caps_count() -> None:
     assert len(parse_candidates(data)) == 10
 
 
+def test_parse_candidates_caps_text_length() -> None:
+    # Длина кандидата ограничена 500 символами (обрезка при парсинге).
+    data = {"memories": [{"text": "а" * 800, "category": "fact", "importance": 5}]}
+    candidates = parse_candidates(data)
+    assert len(candidates) == 1
+    assert len(candidates[0].text) == 500
+    assert candidates[0].text == "а" * 500
+
+
 # --- MemoryExtractor -------------------------------------------------------------------
 
 _VALID_JSON = (

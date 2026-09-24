@@ -14,6 +14,7 @@ from app.search.base import (
     LONG_TIMEOUT,
     SEARCH_TIMEOUT,
     BackendUnavailableError,
+    SearchBackendError,
     SearchOptions,
     SearchResult,
     hostname_of,
@@ -63,26 +64,33 @@ class JinaSearchBackend:
         entries: list[Any]
         if isinstance(payload, dict):
             data = payload.get("data")
-            entries = data if isinstance(data, list) else []
+            if data is None:
+                entries = []
+            elif not isinstance(data, list):
+                raise SearchBackendError(f"{self.backend_id}: unexpected 'data' (not a list)")
+            else:
+                entries = data
         elif isinstance(payload, list):
             entries = payload
         else:
-            entries = []
+            raise SearchBackendError(f"{self.backend_id}: unexpected payload (not object/list)")
         results: list[SearchResult] = []
         for entry in entries[: options.max_results]:
             if not isinstance(entry, dict):
                 continue
             url = entry.get("url")
-            if not url:
+            if not isinstance(url, str) or not url:
                 continue
-            content = entry.get("content") or ""
+            content = entry.get("content")
+            title = entry.get("title")
+            timestamp = entry.get("timestamp")
             results.append(
                 SearchResult(
-                    title=entry.get("title") or "",
+                    title=title if isinstance(title, str) else "",
                     url=url,
-                    snippet=content[:_SNIPPET_CHARS],
+                    snippet=(content if isinstance(content, str) else "")[:_SNIPPET_CHARS],
                     source=hostname_of(url),
-                    published_at=entry.get("timestamp"),
+                    published_at=timestamp if isinstance(timestamp, str) else None,
                 )
             )
         return results

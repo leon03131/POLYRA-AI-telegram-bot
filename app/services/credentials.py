@@ -14,10 +14,13 @@ async def get_provider_api_key(
 ) -> str | None:
     """Расшифрованный ключ провайдера; None, если нигде не настроен.
 
-    Приоритет: enabled-запись в provider_credentials (decrypt) → непустой
-    env_fallback (bootstrap из настроек).
+    Приоритет: запись provider_credentials → непустой env_fallback (bootstrap),
+    причём env_fallback применяется ТОЛЬКО при отсутствии записи. Запись с
+    enabled=False — абсолютный запрет: env НЕ подставляется (A14, контракт §10).
     """
     credential = await ProviderCredentialRepository(session).get(provider)
-    if credential is not None and credential.enabled:
+    if credential is not None:
+        if not credential.enabled:
+            return None
         return crypto.decrypt(credential.encrypted_api_key)
     return env_fallback or None

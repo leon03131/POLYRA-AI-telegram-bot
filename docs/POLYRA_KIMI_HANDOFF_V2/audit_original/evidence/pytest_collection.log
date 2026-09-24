@@ -1,0 +1,340 @@
+tests/unit/test_access.py::test_owner_allowed_without_grant
+tests/unit/test_access.py::test_owner_allowed_even_if_banned
+tests/unit/test_access.py::test_owner_allowed_even_with_expired_grant
+tests/unit/test_access.py::test_permanent_grant_allowed_and_fields_propagated
+tests/unit/test_access.py::test_future_expiry_allowed
+tests/unit/test_access.py::test_allowed_models_converted_to_frozenset
+tests/unit/test_access.py::test_empty_model_set_means_no_models_allowed
+tests/unit/test_access.py::test_expired_one_second_ago_denied
+tests/unit/test_access.py::test_expired_exactly_now_denied
+tests/unit/test_access.py::test_naive_expires_at_treated_as_utc
+tests/unit/test_access.py::test_banned_denied_even_with_valid_grant
+tests/unit/test_access.py::test_no_grant_denied
+tests/unit/test_access.py::test_suspended_grant_denied
+tests/unit/test_access.py::test_revoked_grant_denied
+tests/unit/test_access.py::test_suspended_takes_priority_over_expired
+tests/unit/test_access.py::test_is_model_allowed_denied_permissions
+tests/unit/test_access.py::test_is_model_allowed_none_models_means_all
+tests/unit/test_access.py::test_is_model_allowed_model_in_set
+tests/unit/test_access.py::test_is_model_allowed_model_not_in_set
+tests/unit/test_access.py::test_is_model_allowed_owner_any_model
+tests/unit/test_access.py::test_real_now_does_not_break_permanent_grant
+tests/unit/test_alibaba_provider.py::test_text_stream
+tests/unit/test_alibaba_provider.py::test_reasoning_delta_not_text
+tests/unit/test_alibaba_provider.py::test_tool_calls_incremental
+tests/unit/test_alibaba_provider.py::test_usage_final_chunk
+tests/unit/test_alibaba_provider.py::test_build_payload_thinking[qwen3.8-flash-off-expected0-absent0]
+tests/unit/test_alibaba_provider.py::test_build_payload_thinking[qwen3.8-max-max-expected1-absent1]
+tests/unit/test_alibaba_provider.py::test_build_payload_thinking[qwen3.8-flash-medium-expected2-absent2]
+tests/unit/test_alibaba_provider.py::test_build_payload_thinking[deepseek-v4.1-flash-low-expected3-absent3]
+tests/unit/test_alibaba_provider.py::test_build_payload_thinking[glm-5.3-high-expected4-absent4]
+tests/unit/test_alibaba_provider.py::test_build_payload_thinking[kimi-k3-max-expected5-absent5]
+tests/unit/test_alibaba_provider.py::test_build_payload_thinking[qwen3.8-flash-None-expected6-absent6]
+tests/unit/test_alibaba_provider.py::test_build_payload_thinking[kimi-k3-None-expected7-absent7]
+tests/unit/test_alibaba_provider.py::test_build_payload_messages_mapping
+tests/unit/test_alibaba_provider.py::test_build_payload_tools_and_options
+tests/unit/test_alibaba_provider.py::test_http_error_classification[400-InvalidRequestError]
+tests/unit/test_alibaba_provider.py::test_http_error_classification[401-AuthError]
+tests/unit/test_alibaba_provider.py::test_http_error_classification[429-RateLimitError]
+tests/unit/test_alibaba_provider.py::test_http_error_classification[500-ServerError]
+tests/unit/test_alibaba_provider.py::test_retry_once_on_500_then_success
+tests/unit/test_alibaba_provider.py::test_no_retry_on_400
+tests/unit/test_alibaba_provider.py::test_stream_error_throttling_raises_rate_limit
+tests/unit/test_alibaba_provider.py::test_cancellation_before_iteration_yields_nothing
+tests/unit/test_alibaba_provider.py::test_default_client_trust_env_false
+tests/unit/test_api.py::test_health_ok
+tests/unit/test_api.py::test_auth_invalid_init_data_401
+tests/unit/test_api.py::test_auth_valid_init_data_without_db_500
+tests/unit/test_api.py::test_me_without_authorization_401
+tests/unit/test_api.py::test_me_with_garbage_token_401
+tests/unit/test_api.py::test_admin_without_authorization_401
+tests/unit/test_api.py::test_me_serialization_with_override
+tests/unit/test_api.py::test_models_excludes_internal_and_probe_modes
+tests/unit/test_api.py::test_admin_forbidden_for_non_owner
+tests/unit/test_api_auth.py::test_validate_accepts_valid_init_data
+tests/unit/test_api_auth.py::test_validate_rejects_tampered_field
+tests/unit/test_api_auth.py::test_validate_rejects_wrong_bot_token
+tests/unit/test_api_auth.py::test_validate_rejects_stale_auth_date
+tests/unit/test_api_auth.py::test_validate_accepts_fresh_within_max_age
+tests/unit/test_api_auth.py::test_validate_rejects_missing_hash
+tests/unit/test_api_auth.py::test_validate_rejects_missing_auth_date
+tests/unit/test_api_auth.py::test_validate_rejects_garbage_string
+tests/unit/test_api_auth.py::test_validate_rejects_bad_user_json
+tests/unit/test_api_auth.py::test_session_token_roundtrip
+tests/unit/test_api_auth.py::test_session_token_expired
+tests/unit/test_api_auth.py::test_session_token_forged_signature
+tests/unit/test_api_auth.py::test_session_token_wrong_secret
+tests/unit/test_api_auth.py::test_session_token_malformed[]
+tests/unit/test_api_auth.py::test_session_token_malformed[abc]
+tests/unit/test_api_auth.py::test_session_token_malformed[a.b.c]
+tests/unit/test_api_auth.py::test_session_token_malformed[onlyonepart.]
+tests/unit/test_api_auth.py::test_session_token_malformed[.sig]
+tests/unit/test_compactor.py::test_extract_json_object_bare_and_fenced
+tests/unit/test_compactor.py::test_extract_json_object_rejects_garbage_and_non_objects
+tests/unit/test_compactor.py::test_segment_below_min_segment_no_llm_call
+tests/unit/test_compactor.py::test_successful_compaction_upserts_summary
+tests/unit/test_compactor.py::test_invalid_json_then_repair_succeeds
+tests/unit/test_compactor.py::test_invalid_json_twice_gives_up
+tests/unit/test_compactor.py::test_covered_until_moves_forward
+tests/unit/test_compactor.py::test_no_new_segment_when_already_covered
+tests/unit/test_compactor.py::test_sanitize_title_ok["Deep dive into Python"-Deep dive into Python]
+tests/unit/test_compactor.py::test_sanitize_title_ok[\xab\u0421\u043a\u0430\u0437\u043a\u0430 \u043f\u0440\u043e \u043a\u043e\u0442\u0438\u043a\u043e\u0432\xbb-\u0421\u043a\u0430\u0437\u043a\u0430 \u043f\u0440\u043e \u043a\u043e\u0442\u0438\u043a\u043e\u0432]
+tests/unit/test_compactor.py::test_sanitize_title_ok['\u0420\u0430\u0437\u0431\u043e\u0440 \u0441\u0442\u0430\u0440\u043e\u0433\u043e \u0431\u0430\u0433\u0430'-\u0420\u0430\u0437\u0431\u043e\u0440 \u0441\u0442\u0430\u0440\u043e\u0433\u043e \u0431\u0430\u0433\u0430]
+tests/unit/test_compactor.py::test_sanitize_title_ok[\u0441\u0442\u0440\u043e\u043a\u0430 \u043e\u0434\u0438\u043d\n\u0441\u0442\u0440\u043e\u043a\u0430 \u0434\u0432\u0430\n\u0441\u0442\u0440\u043e\u043a\u0430 \u0442\u0440\u0438-\u0441\u0442\u0440\u043e\u043a\u0430 \u043e\u0434\u0438\u043d \u0441\u0442\u0440\u043e\u043a\u0430 \u0434\u0432\u0430 \u0441\u0442\u0440\u043e\u043a\u0430 \u0442\u0440\u0438]
+tests/unit/test_compactor.py::test_sanitize_title_ok[\u043e\u0434\u0438\u043d \u0434\u0432\u0430 \u0442\u0440\u0438 \u0447\u0435\u0442\u044b\u0440\u0435 \u043f\u044f\u0442\u044c \u0448\u0435\u0441\u0442\u044c \u0441\u0435\u043c\u044c \u0432\u043e\u0441\u0435\u043c\u044c-\u043e\u0434\u0438\u043d \u0434\u0432\u0430 \u0442\u0440\u0438 \u0447\u0435\u0442\u044b\u0440\u0435 \u043f\u044f\u0442\u044c \u0448\u0435\u0441\u0442\u044c \u0441\u0435\u043c\u044c]
+tests/unit/test_compactor.py::test_sanitize_title_ok[  \u043c\u043d\u043e\u0433\u043e   \u043f\u0440\u043e\u0431\u0435\u043b\u043e\u0432   \u043c\u0435\u0436\u0434\u0443   \u0441\u043b\u043e\u0432\u0430\u043c\u0438  -\u043c\u043d\u043e\u0433\u043e \u043f\u0440\u043e\u0431\u0435\u043b\u043e\u0432 \u043c\u0435\u0436\u0434\u0443 \u0441\u043b\u043e\u0432\u0430\u043c\u0438]
+tests/unit/test_compactor.py::test_sanitize_title_none[]
+tests/unit/test_compactor.py::test_sanitize_title_none[   ]
+tests/unit/test_compactor.py::test_sanitize_title_none[""]
+tests/unit/test_compactor.py::test_sanitize_title_none[\u043e\u0434\u043d\u043e]
+tests/unit/test_compactor.py::test_sanitize_title_none[\u0421\u043b\u0438\u0448\u043a\u043e\u043c \u043a\u043e\u0440\u043e\u0442\u043a\u043e]
+tests/unit/test_compactor.py::test_sanitize_title_truncates_to_60_chars
+tests/unit/test_compactor.py::test_title_generator_sets_sanitized_title
+tests/unit/test_compactor.py::test_title_generator_skips_invalid_json
+tests/unit/test_compactor.py::test_title_generator_does_not_overwrite_existing_title
+tests/unit/test_context.py::test_estimate_text_tokens_thresholds
+tests/unit/test_context.py::test_estimate_text_tokens_monotonic
+tests/unit/test_context.py::test_estimate_text_tokens_custom_chars_per_token
+tests/unit/test_context.py::test_token_budget_available
+tests/unit/test_context.py::test_budget_for_uses_default_and_explicit_reserved_output
+tests/unit/test_context.py::test_estimate_message_text_and_image_parts
+tests/unit/test_context.py::test_builder_no_history
+tests/unit/test_context.py::test_builder_short_history_fits_recent
+tests/unit/test_context.py::test_builder_drops_oldest_without_summary_by_budget
+tests/unit/test_context.py::test_builder_recent_never_dropped_even_over_budget
+tests/unit/test_context.py::test_builder_with_summary_uses_recent_only
+tests/unit/test_context.py::test_builder_with_summary_budget_pressure_needs_compaction
+tests/unit/test_context.py::test_builder_renders_memories_block
+tests/unit/test_context.py::test_builder_skips_image_only_messages_and_has_no_current
+tests/unit/test_crypto.py::test_roundtrip_with_passphrase
+tests/unit/test_crypto.py::test_roundtrip_with_fernet_key
+tests/unit/test_crypto.py::test_decrypt_corrupted_token_raises_value_error
+tests/unit/test_crypto.py::test_mask_secret_long
+tests/unit/test_crypto.py::test_mask_secret_short
+tests/unit/test_crypto.py::test_mask_secret_empty
+tests/unit/test_crypto.py::test_mask_secret_api_key
+tests/unit/test_gemini_pool.py::test_current_minute_truncates_to_utc_minute
+tests/unit/test_gemini_pool.py::test_pacific_day_uses_los_angeles_date
+tests/unit/test_gemini_pool.py::test_round_robin_alternates_projects
+tests/unit/test_gemini_pool.py::test_disabled_project_is_skipped
+tests/unit/test_gemini_pool.py::test_cooldown_filters_only_future
+tests/unit/test_gemini_pool.py::test_acquire_empty_pool_returns_none
+tests/unit/test_gemini_pool.py::test_quota_rpm_exhausts_project
+tests/unit/test_gemini_pool.py::test_quota_tpm_none_does_not_limit
+tests/unit/test_gemini_pool.py::test_quota_rpd_reached_blocks
+tests/unit/test_gemini_pool.py::test_429_rotates_to_next_project_and_reports_success
+tests/unit/test_gemini_pool.py::test_429_retry_after_overrides_default_cooldown
+tests/unit/test_gemini_pool.py::test_401_disables_project_and_rotates
+tests/unit/test_gemini_pool.py::test_403_permission_denied_disables_project
+tests/unit/test_gemini_pool.py::test_403_generic_gets_cooldown_not_disable
+tests/unit/test_gemini_pool.py::test_400_invalid_request_no_rotation
+tests/unit/test_gemini_pool.py::test_safety_no_rotation
+tests/unit/test_gemini_pool.py::test_error_after_first_event_not_rotated
+tests/unit/test_gemini_pool.py::test_pool_exhausted_raises
+tests/unit/test_gemini_pool.py::test_success_reconciles_input_tokens
+tests/unit/test_gemini_pool.py::test_5xx_cooldown_30s_and_next_project
+tests/unit/test_gemini_pool.py::test_cancelled_error_propagates_without_report
+tests/unit/test_gemini_provider.py::test_text_stream
+tests/unit/test_gemini_provider.py::test_reasoning_hidden_as_reasoning_delta
+tests/unit/test_gemini_provider.py::test_function_call_with_thought_signature
+tests/unit/test_gemini_provider.py::test_usage_metadata
+tests/unit/test_gemini_provider.py::test_finish_reason_max_tokens_maps_to_length
+tests/unit/test_gemini_provider.py::test_finish_reason_safety_raises
+tests/unit/test_gemini_provider.py::test_prompt_feedback_block_reason_raises
+tests/unit/test_gemini_provider.py::test_missing_api_key_raises
+tests/unit/test_gemini_provider.py::test_cancellation_stops_without_done
+tests/unit/test_gemini_provider.py::test_empty_text_part_with_signature_is_skipped
+tests/unit/test_gemini_provider.py::test_done_sentinel_stops_stream
+tests/unit/test_gemini_provider.py::test_payload_system_prompt_and_contents
+tests/unit/test_gemini_provider.py::test_payload_image_part
+tests/unit/test_gemini_provider.py::test_payload_assistant_tool_call_returns_thought_signature
+tests/unit/test_gemini_provider.py::test_payload_thinking_level_and_max_output_tokens
+tests/unit/test_gemini_provider.py::test_payload_no_generation_config_when_empty
+tests/unit/test_gemini_provider.py::test_payload_tools_and_tool_choice
+tests/unit/test_gemini_provider.py::test_http_error_mapping[400-InvalidRequestError]
+tests/unit/test_gemini_provider.py::test_http_error_mapping[401-AuthError]
+tests/unit/test_gemini_provider.py::test_http_error_mapping[403-ForbiddenError]
+tests/unit/test_gemini_provider.py::test_http_error_mapping[404-InvalidRequestError]
+tests/unit/test_gemini_provider.py::test_http_error_mapping[429-RateLimitError]
+tests/unit/test_gemini_provider.py::test_http_error_mapping[500-ServerError]
+tests/unit/test_gemini_provider.py::test_rate_limit_retry_after_from_retry_info
+tests/unit/test_gemini_provider.py::test_sanitize_gemini_schema_strips_unsupported_keys
+tests/unit/test_gemini_provider.py::test_payload_tools_are_sanitized
+tests/unit/test_memory.py::test_normalize_memory_text[  \u041f\u0440\u0438\u0432\u0435\u0442,  \u041c\u0438\u0440! -\u043f\u0440\u0438\u0432\u0435\u0442 \u043c\u0438\u0440]
+tests/unit/test_memory.py::test_normalize_memory_text[\u043c\u043d\u043e\u0433\u043e\n\t\u043f\u0440\u043e\u0431\u0435\u043b\u043e\u0432   \u043c\u0435\u0436\u0434\u0443-\u043c\u043d\u043e\u0433\u043e \u043f\u0440\u043e\u0431\u0435\u043b\u043e\u0432 \u043c\u0435\u0436\u0434\u0443]
+tests/unit/test_memory.py::test_normalize_memory_text[(\u0441\u043a\u043e\u0431\u043a\u0438), \xab\u0451\u043b\u043e\u0447\u043a\u0438\xbb, "\u043a\u0430\u0432\u044b\u0447\u043a\u0438"-\u0441\u043a\u043e\u0431\u043a\u0438 \u0451\u043b\u043e\u0447\u043a\u0438 \u043a\u0430\u0432\u044b\u0447\u043a\u0438]
+tests/unit/test_memory.py::test_normalize_memory_text[e-mail \u0438 don't-e-mail \u0438 don't]
+tests/unit/test_memory.py::test_normalize_memory_text[... ...-]
+tests/unit/test_memory.py::test_normalize_memory_text[-]
+tests/unit/test_memory.py::test_jaccard_tokens
+tests/unit/test_memory.py::test_find_duplicate_exact_normalized_match
+tests/unit/test_memory.py::test_find_duplicate_near_dup_above_threshold
+tests/unit/test_memory.py::test_find_duplicate_below_threshold_returns_none
+tests/unit/test_memory.py::test_find_duplicate_empty_input_returns_none
+tests/unit/test_memory.py::test_retrieve_fts_hits_skip_fallback
+tests/unit/test_memory.py::test_retrieve_empty_fts_falls_back_to_top_important
+tests/unit/test_memory.py::test_retrieve_blank_query_skips_fts
+tests/unit/test_memory.py::test_retrieve_no_memories_does_not_touch
+tests/unit/test_memory.py::test_parse_candidates_validates_and_clamps
+tests/unit/test_memory.py::test_parse_candidates_rejects_garbage
+tests/unit/test_memory.py::test_parse_candidates_caps_count
+tests/unit/test_memory.py::test_extractor_adds_new_memories
+tests/unit/test_memory.py::test_extractor_merges_exact_duplicate_instead_of_insert
+tests/unit/test_memory.py::test_extractor_merges_near_duplicate_and_updates_longer_text
+tests/unit/test_memory.py::test_extractor_dedups_within_single_batch
+tests/unit/test_memory.py::test_extractor_empty_memories_returns_zero_without_store
+tests/unit/test_memory.py::test_extractor_invalid_json_returns_zero_without_exception
+tests/unit/test_memory.py::test_extractor_llm_failure_returns_zero
+tests/unit/test_memory.py::test_extractor_skips_short_exchange_by_min_chars
+tests/unit/test_memory.py::test_extractor_isolates_user_id
+tests/unit/test_registry.py::test_registry_contains_all_spec_models
+tests/unit/test_registry.py::test_internal_model_hidden_from_user_list
+tests/unit/test_registry.py::test_get_unknown_model_raises
+tests/unit/test_registry.py::test_thinking_modes_per_model
+tests/unit/test_registry.py::test_images_capability
+tests/unit/test_registry.py::test_filter_by_permissions
+tests/unit/test_search.py::test_serper_mapping
+tests/unit/test_search.py::test_serper_auth_error_unavailable[401]
+tests/unit/test_search.py::test_serper_auth_error_unavailable[403]
+tests/unit/test_search.py::test_serper_500_retryable_single_retry
+tests/unit/test_search.py::test_serper_invalid_json
+tests/unit/test_search.py::test_serper_unconfigured
+tests/unit/test_search.py::test_brave_mapping
+tests/unit/test_search.py::test_serpapi_ai_overview_text_blocks
+tests/unit/test_search.py::test_serpapi_ai_overview_page_token_two_steps
+tests/unit/test_search.py::test_serpapi_ai_overview_error_degrades_to_organic
+tests/unit/test_search.py::test_serpapi_normal_search
+tests/unit/test_search.py::test_jina_search_mapping
+tests/unit/test_search.py::test_jina_search_requires_key
+tests/unit/test_search.py::test_jina_reader_read
+tests/unit/test_search.py::test_jina_reader_error_returns_none
+tests/unit/test_search.py::test_manager_fallback_order
+tests/unit/test_search.py::test_manager_skips_unconfigured
+tests/unit/test_search.py::test_manager_all_failed
+tests/unit/test_search.py::test_manager_dedupe_and_max_results
+tests/unit/test_search.py::test_manager_auto_question_uses_ai_overview
+tests/unit/test_search.py::test_manager_auto_non_question_goes_normal
+tests/unit/test_search.py::test_manager_ai_overview_failure_falls_back_to_normal
+tests/unit/test_search.py::test_html_to_text_strips_scripts_and_collapses
+tests/unit/test_search.py::test_html_to_text_max_chars
+tests/unit/test_search.py::test_fetch_plain_text
+tests/unit/test_search.py::test_fetch_html_extracts_text
+tests/unit/test_search.py::test_fetch_redirect_to_public_ok
+tests/unit/test_search.py::test_fetch_redirect_to_private_blocked
+tests/unit/test_search.py::test_fetch_private_url_blocked_before_request
+tests/unit/test_search.py::test_fetch_pdf_rejected
+tests/unit/test_search.py::test_fetch_truncated_over_max_bytes
+tests/unit/test_search.py::test_fetch_uses_reader_when_provided
+tests/unit/test_search.py::test_fetch_reader_none_falls_back_to_local_extraction
+tests/unit/test_ssrf.py::test_http_and_https_allowed
+tests/unit/test_ssrf.py::test_non_http_schemes_blocked[file:///etc/passwd]
+tests/unit/test_ssrf.py::test_non_http_schemes_blocked[ftp://example.com/x]
+tests/unit/test_ssrf.py::test_non_http_schemes_blocked[gopher://example.com/1]
+tests/unit/test_ssrf.py::test_ip_literals_blocked[http://127.0.0.1/]
+tests/unit/test_ssrf.py::test_ip_literals_blocked[http://10.0.0.1/]
+tests/unit/test_ssrf.py::test_ip_literals_blocked[http://172.16.0.1/]
+tests/unit/test_ssrf.py::test_ip_literals_blocked[http://192.168.1.1/]
+tests/unit/test_ssrf.py::test_ip_literals_blocked[http://169.254.1.1/]
+tests/unit/test_ssrf.py::test_ip_literals_blocked[http://169.254.169.254/latest/meta-data]
+tests/unit/test_ssrf.py::test_ip_literals_blocked[http://0.0.0.0/]
+tests/unit/test_ssrf.py::test_ip_literals_blocked[http://224.0.0.1/]
+tests/unit/test_ssrf.py::test_ip_literals_blocked[http://[::1]/]
+tests/unit/test_ssrf.py::test_ip_literals_blocked[http://[fe80::1]/]
+tests/unit/test_ssrf.py::test_ip_literals_blocked[http://[fc00::1]/]
+tests/unit/test_ssrf.py::test_hostname_resolving_to_private_ip_blocked
+tests/unit/test_ssrf.py::test_module_resolve_ips_used_when_no_resolver
+tests/unit/test_ssrf.py::test_dns_failure_raises_ssrf_error
+tests/unit/test_ssrf.py::test_resolve_ips_ip_literal_passthrough
+tests/unit/test_ssrf.py::test_missing_hostname_blocked
+tests/unit/test_tools.py::TestValidateJsonSchema::test_ok
+tests/unit/test_tools.py::TestValidateJsonSchema::test_missing_required
+tests/unit/test_tools.py::TestValidateJsonSchema::test_wrong_type
+tests/unit/test_tools.py::TestValidateJsonSchema::test_bool_is_not_integer
+tests/unit/test_tools.py::TestValidateJsonSchema::test_enum_violation
+tests/unit/test_tools.py::TestValidateJsonSchema::test_additional_properties_rejected
+tests/unit/test_tools.py::TestValidateJsonSchema::test_number_range
+tests/unit/test_tools.py::TestValidateJsonSchema::test_min_length
+tests/unit/test_tools.py::TestValidateJsonSchema::test_array_items
+tests/unit/test_tools.py::TestRegistry::test_list_enabled_filters_by_permission
+tests/unit/test_tools.py::TestRegistry::test_list_enabled_skips_disabled
+tests/unit/test_tools.py::TestRegistry::test_get_unknown_returns_none
+tests/unit/test_tools.py::TestRegistry::test_make_llm_tools
+tests/unit/test_tools.py::TestRunner::test_unknown_tool
+tests/unit/test_tools.py::TestRunner::test_disabled_tool_denied
+tests/unit/test_tools.py::TestRunner::test_permission_denied
+tests/unit/test_tools.py::TestRunner::test_invalid_json_arguments
+tests/unit/test_tools.py::TestRunner::test_schema_invalid_arguments
+tests/unit/test_tools.py::TestRunner::test_timeout
+tests/unit/test_tools.py::TestRunner::test_result_truncated_to_max_result_size
+tests/unit/test_tools.py::TestRunner::test_unexpected_exception_is_sanitized
+tests/unit/test_tools.py::TestRunner::test_tool_execution_error_text_passes_through
+tests/unit/test_tools.py::TestToolCallRecording::test_records_execution
+tests/unit/test_tools.py::TestToolCallRecording::test_no_record_without_generation_run_id
+tests/unit/test_tools.py::TestToolCallRecording::test_record_db_failure_does_not_propagate
+tests/unit/test_tools.py::TestSetChatTitle::test_sets_title
+tests/unit/test_tools.py::TestSetChatTitle::test_title_already_set
+tests/unit/test_tools.py::TestSetChatTitle::test_invalid_title
+tests/unit/test_tools.py::TestWebSearch::test_not_configured
+tests/unit/test_tools.py::TestWebSearch::test_formats_results_with_sources
+tests/unit/test_tools.py::TestWebSearch::test_empty_results
+tests/unit/test_tools.py::TestOpenUrl::test_success
+tests/unit/test_tools.py::TestOpenUrl::test_ssrf_blocked
+tests/unit/test_tools.py::TestRememberForget::test_remember_adds_new
+tests/unit/test_tools.py::TestRememberForget::test_remember_deduplicates
+tests/unit/test_tools.py::TestRememberForget::test_forget_deletes_best_match
+tests/unit/test_tools.py::TestRememberForget::test_forget_not_found
+
+==================================== ERRORS ====================================
+_______________ ERROR collecting tests/unit/test_bot_helpers.py ________________
+ImportError while importing test module '/mnt/data/audit_work/POLYRA-AI-telegram-bot-master/tests/unit/test_bot_helpers.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/unit/test_bot_helpers.py:7: in <module>
+    from app.bot.routers.commands import build_open_chat_callback, parse_open_chat_callback
+app/bot/routers/commands.py:6: in <module>
+    from aiogram import Bot, F, Router
+E   ModuleNotFoundError: No module named 'aiogram'
+________________ ERROR collecting tests/unit/test_bot_wiring.py ________________
+ImportError while importing test module '/mnt/data/audit_work/POLYRA-AI-telegram-bot-master/tests/unit/test_bot_wiring.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/unit/test_bot_wiring.py:12: in <module>
+    from app.bot.dispatcher import create_dispatcher
+app/bot/dispatcher.py:7: in <module>
+    from aiogram import Bot, Dispatcher
+E   ModuleNotFoundError: No module named 'aiogram'
+______________ ERROR collecting tests/unit/test_draft_streamer.py ______________
+ImportError while importing test module '/mnt/data/audit_work/POLYRA-AI-telegram-bot-master/tests/unit/test_draft_streamer.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/unit/test_draft_streamer.py:8: in <module>
+    from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
+E   ModuleNotFoundError: No module named 'aiogram'
+________________ ERROR collecting tests/unit/test_generation.py ________________
+ImportError while importing test module '/mnt/data/audit_work/POLYRA-AI-telegram-bot-master/tests/unit/test_generation.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/unit/test_generation.py:34: in <module>
+    from app.services.generation import (
+app/services/generation.py:19: in <module>
+    from aiogram import Bot
+E   ModuleNotFoundError: No module named 'aiogram'
+=========================== short test summary info ============================
+ERROR tests/unit/test_bot_helpers.py
+ERROR tests/unit/test_bot_wiring.py
+ERROR tests/unit/test_draft_streamer.py
+ERROR tests/unit/test_generation.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 4 errors during collection !!!!!!!!!!!!!!!!!!!!
+285 tests collected, 4 errors in 1.26s

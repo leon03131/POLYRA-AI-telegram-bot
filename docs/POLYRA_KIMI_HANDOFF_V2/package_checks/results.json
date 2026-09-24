@@ -1,0 +1,21 @@
+{
+  "historical_files_preserved": 28,
+  "historical_files_byte_identical": true,
+  "snapshot_sha256": "37f7f26dc7503319db3b7bc90136f273cde3003a4ebaae54e39157f892ef6294",
+  "full_audit_sections_in_current_prompt": 40,
+  "new_requirements_in_current_prompt": 4,
+  "agent_frontmatter_yaml_parse": "passed",
+  "agent_profiles": 8,
+  "installer_preview_no_writes": "passed",
+  "installer_first_apply_and_config_preservation": "passed",
+  "installer_idempotent_reapply": "passed",
+  "installer_conflict_no_other_files_written": "passed",
+  "installer_symlink_destination_rejected": "passed",
+  "installer_invalid_root_rejected": "passed",
+  "live_opencode_execution": false,
+  "live_provider_calls": false,
+  "new_full_bot_audit_performed": false,
+  "historical_finding_text_preserved_except_A27_model_count": true,
+  "model_matrix_baseline_rows": 10,
+  "work_items": 44
+}

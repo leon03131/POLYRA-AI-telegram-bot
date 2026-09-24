@@ -255,6 +255,7 @@ async def test_flush_tail_mode_for_long_text() -> None:
     assert len(markdown) == 32700 + 2  # префикс + последние 32700 символов
     assert markdown.endswith("y" * 100)
 
+
 async def test_finalize_tier3_edits_existing_message_instead_of_duplicate() -> None:
     """Tier 3: финал — edit существующего сообщения, НЕ новое сообщение (нет дублей)."""
     bot = FakeBot()

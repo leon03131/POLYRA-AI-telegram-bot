@@ -1,0 +1,154 @@
+{
+  "typescript_version": "5.8.3",
+  "note": "Syntax parser only. NOT tsc project typecheck, npm build, or React E2E.",
+  "files": [
+    {
+      "file": "miniapp/src/App.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/admin/AdminAuditPage.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/admin/AdminDashboardPage.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/admin/AdminGeminiPage.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/admin/AdminLayout.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/admin/AdminProvidersPage.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/admin/AdminSearchPage.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/admin/AdminSystemPage.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/admin/AdminUsersPage.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/api/auth.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/api/client.ts",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/api/hooks.ts",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/api/types.ts",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/components/Button.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/components/ChatSettingsForm.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/components/Chip.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/components/ConfirmDialog.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/components/EmptyState.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/components/Input.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/components/List.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/components/Modal.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/components/Section.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/components/Select.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/components/Spinner.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/components/Toggle.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/components/index.ts",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/main.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/pages/ChatSettingsPage.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/pages/ChatsPage.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/pages/HomePage.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/pages/MemoryPage.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/pages/SettingsPage.tsx",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/telegram/telegram-web-app.d.ts",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/telegram/webapp.ts",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/src/utils.ts",
+      "syntax_errors": []
+    },
+    {
+      "file": "miniapp/vite.config.ts",
+      "syntax_errors": []
+    }
+  ],
+  "uuid_example": {
+    "id": "eb6be9c9-1cde-4103-891c-d12e4c83edab",
+    "number_is_nan": true
+  }
+}

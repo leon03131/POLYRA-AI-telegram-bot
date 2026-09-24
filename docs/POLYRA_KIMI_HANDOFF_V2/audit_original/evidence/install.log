@@ -1,0 +1,53 @@
+Using Python 3.13.5 environment at: /mnt/data/audit_venv
+WARN Retry attempt #0. Sleeping 162.772375ms before the next attempt
+WARN Retry attempt #0. Sleeping 373.594383ms before the next attempt
+WARN Retry attempt #0. Sleeping 355.196142ms before the next attempt
+WARN Retry attempt #0. Sleeping 422.480999ms before the next attempt
+WARN Retry attempt #0. Sleeping 68.052837ms before the next attempt
+WARN Retry attempt #0. Sleeping 324.558587ms before the next attempt
+WARN Retry attempt #0. Sleeping 152.264318ms before the next attempt
+WARN Retry attempt #0. Sleeping 996.251592ms before the next attempt
+WARN Retry attempt #0. Sleeping 374.956884ms before the next attempt
+WARN Retry attempt #0. Sleeping 402.930534ms before the next attempt
+WARN Retry attempt #0. Sleeping 977.709725ms before the next attempt
+WARN Retry attempt #0. Sleeping 489.733982ms before the next attempt
+WARN Retry attempt #0. Sleeping 291.74399ms before the next attempt
+WARN Retry attempt #0. Sleeping 546.833572ms before the next attempt
+WARN Retry attempt #0. Sleeping 748.787048ms before the next attempt
+WARN Retry attempt #0. Sleeping 386.018547ms before the next attempt
+WARN Retry attempt #0. Sleeping 316.422227ms before the next attempt
+WARN Retry attempt #0. Sleeping 495.154781ms before the next attempt
+WARN Retry attempt #1. Sleeping 1.320855006s before the next attempt
+WARN Retry attempt #1. Sleeping 617.147456ms before the next attempt
+WARN Retry attempt #1. Sleeping 299.002056ms before the next attempt
+WARN Retry attempt #1. Sleeping 1.823846694s before the next attempt
+WARN Retry attempt #1. Sleeping 781.80087ms before the next attempt
+WARN Retry attempt #1. Sleeping 732.363704ms before the next attempt
+WARN Retry attempt #1. Sleeping 860.23756ms before the next attempt
+WARN Retry attempt #1. Sleeping 587.697989ms before the next attempt
+WARN Retry attempt #1. Sleeping 1.345438307s before the next attempt
+WARN Retry attempt #1. Sleeping 1.029919039s before the next attempt
+WARN Retry attempt #2. Sleeping 227.788677ms before the next attempt
+WARN Retry attempt #1. Sleeping 1.493389992s before the next attempt
+WARN Retry attempt #1. Sleeping 585.890396ms before the next attempt
+WARN Retry attempt #1. Sleeping 1.434388243s before the next attempt
+WARN Retry attempt #2. Sleeping 844.528924ms before the next attempt
+WARN Retry attempt #1. Sleeping 1.940122576s before the next attempt
+WARN Retry attempt #1. Sleeping 1.987811779s before the next attempt
+WARN Retry attempt #1. Sleeping 1.728727553s before the next attempt
+WARN Retry attempt #1. Sleeping 438.3012ms before the next attempt
+WARN Retry attempt #2. Sleeping 3.635725667s before the next attempt
+WARN Retry attempt #2. Sleeping 1.244102878s before the next attempt
+WARN Retry attempt #1. Sleeping 625.914023ms before the next attempt
+WARN Retry attempt #2. Sleeping 1.833544148s before the next attempt
+WARN Retry attempt #2. Sleeping 3.920361124s before the next attempt
+WARN Retry attempt #2. Sleeping 2.570907489s before the next attempt
+WARN Retry attempt #2. Sleeping 213.353541ms before the next attempt
+WARN Retry attempt #2. Sleeping 2.811721195s before the next attempt
+WARN Retry attempt #2. Sleeping 2.020109715s before the next attempt
+WARN Retry attempt #2. Sleeping 2.229950603s before the next attempt
+error: Request failed after 3 retries
+  Caused by: Failed to fetch: `https://pypi.org/simple/sqlalchemy/`
+  Caused by: error sending request for url (https://pypi.org/simple/sqlalchemy/)
+  Caused by: client error (Connect)
+  Caused by: operation timed out

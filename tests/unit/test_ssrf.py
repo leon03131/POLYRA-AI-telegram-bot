@@ -7,7 +7,7 @@ import socket
 import pytest
 
 from app.security import ssrf
-from app.security.ssrf import SSRFError, assert_url_public, resolve_ips
+from app.security.ssrf import SSRFError, assert_url_public, resolve_ips, validate_url_public_ips
 
 _PUBLIC = [ipaddress.ip_address("93.184.216.34")]
 _PRIVATE = [ipaddress.ip_address("10.1.2.3")]
@@ -91,3 +91,40 @@ async def test_resolve_ips_ip_literal_passthrough() -> None:
 async def test_missing_hostname_blocked() -> None:
     with pytest.raises(SSRFError):
         await assert_url_public("http://", resolver=_resolver(_PUBLIC))
+
+
+# --- validate_url_public_ips (pinned-connect контракт A19) ----------------------
+
+
+async def test_validate_returns_hostname_and_ips() -> None:
+    hostname, ips = await validate_url_public_ips(
+        "https://example.com:8443/x", resolver=_resolver(_PUBLIC)
+    )
+    assert hostname == "example.com"
+    assert ips == _PUBLIC
+
+
+async def test_validate_ip_literal_passthrough_no_resolver() -> None:
+    async def fail_resolver(hostname: str):
+        raise AssertionError("resolver must not be called for IP literals")
+
+    hostname, ips = await validate_url_public_ips(
+        "http://93.184.216.34/path", resolver=fail_resolver
+    )
+    assert hostname == "93.184.216.34"
+    assert ips == _PUBLIC
+
+
+async def test_validate_private_ip_literal_blocked() -> None:
+    with pytest.raises(SSRFError):
+        await validate_url_public_ips("http://10.0.0.1/", resolver=_resolver(_PUBLIC))
+
+
+async def test_validate_hostname_resolving_to_private_blocked() -> None:
+    with pytest.raises(SSRFError):
+        await validate_url_public_ips("http://internal.example", resolver=_resolver(_PRIVATE))
+
+
+async def test_validate_bad_scheme_blocked() -> None:
+    with pytest.raises(SSRFError):
+        await validate_url_public_ips("file:///etc/passwd", resolver=_resolver(_PUBLIC))

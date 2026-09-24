@@ -10,7 +10,7 @@ from app.search.base import (
     SupportsAIOverview,
 )
 from app.search.brave import BraveSearchBackend
-from app.search.fetcher import MAX_BYTES, FetchedPage, fetch_url
+from app.search.fetcher import MAX_BYTES, FetchedPage, PinnedHTTPTransport, fetch_url
 from app.search.jina import JinaReaderBackend, JinaSearchBackend
 from app.search.manager import SearchManager
 from app.search.playwright_google import PlaywrightGoogleBackend
@@ -25,6 +25,7 @@ __all__ = [
     "FetchedPage",
     "JinaReaderBackend",
     "JinaSearchBackend",
+    "PinnedHTTPTransport",
     "PlaywrightGoogleBackend",
     "SearchBackend",
     "SearchBackendError",

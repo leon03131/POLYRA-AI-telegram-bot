@@ -71,3 +71,17 @@ class TokenBudgetManager:
             elif part_type == "image":
                 total += self._image_tokens
         return max(1, total)
+
+    def estimate_current(self, parts: list[dict[str, Any]] | None) -> int:
+        """Оценка текущего (current) user-сообщения: text + image parts.
+
+        Аддитивная (пустой ввод → 0): добавляется к used в бюджете билдера.
+        """
+        total = 0
+        for part in parts or []:
+            part_type = part.get("type")
+            if part_type == "text":
+                total += self.estimate_text(str(part.get("text") or ""))
+            elif part_type == "image":
+                total += self._image_tokens
+        return total

@@ -342,6 +342,7 @@ async def test_rate_limit_retry_after_from_retry_info() -> None:
     assert exc_info.value.retry_after == 4.0
     assert exc_info.value.retryable is True
 
+
 def test_sanitize_gemini_schema_strips_unsupported_keys() -> None:
     """additionalProperties/$schema и прочие не-Gemini ключи вырезаются рекурсивно."""
     from app.llm.providers.gemini import sanitize_gemini_schema

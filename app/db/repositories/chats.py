@@ -42,6 +42,16 @@ class ChatRepository:
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    async def count_for_user(
+        self, owner_user_id: uuid.UUID, *, include_archived: bool = False
+    ) -> int:
+        """Число чатов пользователя (для пагинации); фильтр archived — как в list_for_user."""
+        stmt = select(func.count()).select_from(Chat).where(Chat.owner_user_id == owner_user_id)
+        if not include_archived:
+            stmt = stmt.where(Chat.archived_at.is_(None))
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())
+
     async def get_latest_active(self, owner_user_id: uuid.UUID) -> Chat | None:
         """Последний по updated_at неархивированный чат пользователя."""
         stmt = (

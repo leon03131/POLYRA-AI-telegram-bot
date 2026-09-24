@@ -12,6 +12,7 @@ from app.llm.base import LLMRequest, LLMTool
 from app.llm.errors import (
     AuthError,
     InvalidRequestError,
+    NetworkError,
     RateLimitError,
     ServerError,
 )
@@ -113,6 +114,8 @@ async def test_tool_calls_incremental() -> None:
 
 
 async def test_usage_final_chunk() -> None:
+    """Usage-trailer (choices: []) приходит ПОСЛЕ finish_reason-чанка, но
+    эмититься должен ДО Done (FIX_V2 §1) — Done всегда терминальный."""
     lines = [
         _chunk({"content": "ok"}),
         _chunk({}, finish="stop"),
@@ -134,9 +137,45 @@ async def test_usage_final_chunk() -> None:
     events = await _collect(provider, _request())
     assert events == [
         TextDelta("ok"),
-        Done("stop"),
         Usage(input_tokens=10, output_tokens=5, reasoning_tokens=3, total_tokens=15),
+        Done("stop"),
     ]
+
+
+async def test_unexpected_eof_without_finish_raises() -> None:
+    """Поток оборвался без finish_reason и без [DONE] — ошибка, не успех."""
+    lines = [_chunk({"content": "hi"})]
+    provider = _make_provider(lambda req: _sse_response(lines))
+    with pytest.raises(NetworkError, match="unexpected EOF"):
+        await _collect(provider, _request())
+
+
+async def test_unexpected_eof_with_pending_tool_calls_raises() -> None:
+    """EOF с недособранными tool_calls (без finish) — та же EOF-ошибка."""
+    lines = [
+        _chunk(
+            {
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "call_1",
+                        "function": {"name": "web_search", "arguments": '{"q":'},
+                    }
+                ]
+            }
+        ),
+    ]
+    provider = _make_provider(lambda req: _sse_response(lines))
+    with pytest.raises(NetworkError, match="unexpected EOF"):
+        await _collect(provider, _request())
+
+
+async def test_done_marker_without_finish_is_eof_error() -> None:
+    """[DONE] без finish_reason: терминального Done нет — unexpected EOF."""
+    lines = [_chunk({"content": "hi"}), "data: [DONE]"]
+    provider = _make_provider(lambda req: _sse_response(lines))
+    with pytest.raises(NetworkError, match="unexpected EOF"):
+        await _collect(provider, _request())
 
 
 @pytest.mark.parametrize(
@@ -201,6 +240,42 @@ def test_build_payload_thinking(
     for key in absent:
         assert key not in payload, f"{model}/{thinking}: unexpected {key}"
     assert not ("reasoning_effort" in payload and "thinking_budget" in payload)
+
+
+@pytest.mark.parametrize(
+    ("thinking", "expected"),
+    [
+        # default (None): provider default = thinking ON — НИКАКИХ thinking-ключей
+        (None, {}),
+        ("off", {"enable_thinking": False}),
+        ("high", {"reasoning_effort": "high"}),
+        ("max", {"reasoning_effort": "max"}),
+    ],
+)
+def test_build_payload_deepseek_v4_pro_thinking(
+    thinking: str | None, expected: dict[str, Any]
+) -> None:
+    payload = build_chat_completions_payload(_request(model="deepseek-v4-pro", thinking=thinking))
+    for key, value in expected.items():
+        assert payload.get(key) == value, f"thinking={thinking}: {key}"
+    # deepseek-v4-pro: никогда не шлём остальные thinking-параметры
+    forbidden = {
+        "enable_thinking",
+        "reasoning_effort",
+        "thinking_budget",
+        "preserve_thinking",
+        "clear_thinking",
+    } - set(expected)
+    for key in forbidden:
+        assert key not in payload, f"thinking={thinking}: unexpected {key}"
+
+
+def test_build_payload_deepseek_v4_pro_max_tokens() -> None:
+    payload = build_chat_completions_payload(
+        _request(model="deepseek-v4-pro", max_output_tokens=1024)
+    )
+    assert payload["max_completion_tokens"] == 1024
+    assert "max_tokens" not in payload
 
 
 def test_build_payload_messages_mapping() -> None:

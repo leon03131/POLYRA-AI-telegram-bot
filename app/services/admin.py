@@ -13,7 +13,9 @@ from app.db.models import User
 from app.db.repositories import (
     AccessRepository,
     AuditLogRepository,
+    ModelOverrideRepository,
     ModelPermissionRepository,
+    UserModelAccessRepository,
     UserRepository,
 )
 
@@ -25,6 +27,7 @@ ACCESS_REVOKED = "access_revoked"
 USER_BANNED = "user_banned"
 USER_UNBANNED = "user_unbanned"
 MODEL_PERMISSION_CHANGED = "model_permission_changed"
+MODEL_ENABLED_CHANGED = "model_enabled_changed"
 GEMINI_KEY_ADDED = "gemini_key_added"
 GEMINI_KEY_BULK_ADDED = "gemini_key_bulk_added"
 GEMINI_KEY_ENABLED = "gemini_key_enabled"
@@ -32,10 +35,17 @@ GEMINI_KEY_DISABLED = "gemini_key_disabled"
 GEMINI_KEY_MOVED = "gemini_key_moved"
 GEMINI_KEY_DELETED = "gemini_key_deleted"
 GEMINI_QUOTA_UPDATED = "gemini_quota_updated"
+GEMINI_PROJECT_TESTED = "gemini_project_tested"
+GEMINI_COUNTERS_RESET = "gemini_counters_reset"
 PROVIDER_KEY_SET = "provider_key_set"
+PROVIDER_SMOKE_TEST = "provider_smoke_test"
 SEARCH_BACKEND_CHANGED = "search_backend_changed"
 SYSTEM_SETTINGS_UPDATED = "system_settings_updated"
 SYSTEM_PROMPT_UPDATED = "system_prompt_updated"
+
+# Sentinel «поле не передано» (A26): отличается от explicit None (записать NULL).
+# Роуты передают только ключи из body.model_fields_set.
+UNSET: Any = object()
 
 
 async def audit(
@@ -77,18 +87,24 @@ async def grant_access(
     *,
     actor_id: int,
     telegram_user_id: int,
-    expires_at: datetime | None,
-    requests_per_day: int | None = None,
-    token_limit: int | None = None,
-    max_concurrent_generations: int | None = None,
-    can_use_web_search: bool | None = None,
-    can_use_memory: bool | None = None,
-    note: str | None = None,
+    expires_at: Any = UNSET,
+    requests_per_day: Any = UNSET,
+    token_limit: Any = UNSET,
+    max_concurrent_generations: Any = UNSET,
+    can_use_web_search: Any = UNSET,
+    can_use_memory: Any = UNSET,
+    note: Any = UNSET,
 ) -> None:
-    """Выдать/обновить грант (status=active); пользователь создаётся при отсутствии."""
+    """Выдать/обновить грант (status=active); пользователь создаётся при отсутствии.
+
+    Семантика опциональных полей (A26): UNSET (не передано) — колонку не
+    трогаем; explicit None — записать NULL (снять лимит / permanent).
+    Новый грант: непереданные поля получают дефолты колонок (лимиты NULL).
+    """
     user = await _get_or_create_user(session, telegram_user_id)
     repo = AccessRepository(session)
-    optional = {
+    provided: dict[str, Any] = {
+        "expires_at": expires_at,
         "requests_per_day": requests_per_day,
         "token_limit": token_limit,
         "max_concurrent_generations": max_concurrent_generations,
@@ -96,8 +112,8 @@ async def grant_access(
         "can_use_memory": can_use_memory,
         "note": note,
     }
-    fields: dict[str, Any] = {"status": "active", "expires_at": expires_at, "revoked_at": None}
-    fields.update({key: value for key, value in optional.items() if value is not None})
+    fields: dict[str, Any] = {"status": "active", "revoked_at": None}
+    fields.update({key: value for key, value in provided.items() if value is not UNSET})
     if await repo.get_grant(user.id) is None:
         fields["created_by"] = actor_id
     await repo.upsert_grant(user.id, **fields)
@@ -108,8 +124,9 @@ async def grant_access(
         target_type="user",
         target_id=str(telegram_user_id),
         metadata={
-            "expires_at": expires_at.isoformat() if expires_at is not None else None,
-            **{key: value for key, value in optional.items() if value is not None},
+            key: (value.isoformat() if isinstance(value, datetime) else value)
+            for key, value in provided.items()
+            if value is not UNSET
         },
     )
 
@@ -143,15 +160,15 @@ async def _update_grant(
 
 
 async def extend_access(
-    session: AsyncSession, *, actor_id: int, telegram_user_id: int, expires_at: datetime
+    session: AsyncSession, *, actor_id: int, telegram_user_id: int, expires_at: datetime | None
 ) -> bool:
-    """Продлить грант (expires_at); False, если гранта нет."""
+    """Продлить грант (expires_at); explicit None = permanent. False, если гранта нет."""
     return await _update_grant(
         session,
         actor_id=actor_id,
         telegram_user_id=telegram_user_id,
         action=ACCESS_EXTENDED,
-        metadata={"expires_at": expires_at.isoformat()},
+        metadata={"expires_at": expires_at.isoformat() if expires_at is not None else None},
         expires_at=expires_at,
     )
 
@@ -226,21 +243,53 @@ async def set_model_permissions(
     telegram_user_id: int,
     allowed_models: list[str] | None,
 ) -> None:
-    """Заменить per-model разрешения; None → удалить все записи (без ограничений).
+    """Заменить per-model разрешения и режим доступа (A03).
+
+    None → mode 'all' + очистка allowlist (без ограничений);
+    []   → mode 'list' + пустой allowlist (ЗАПРЕТ всех моделей);
+    [m…] → mode 'list' + указанные модели.
 
     Пользователь создаётся при отсутствии (преднастройка до первого логина).
     """
     user = await _get_or_create_user(session, telegram_user_id)
-    repo = ModelPermissionRepository(session)
-    await repo.clear_for_user(user.id)
-    if allowed_models is not None:
+    permission_repo = ModelPermissionRepository(session)
+    access_repo = UserModelAccessRepository(session)
+    await permission_repo.clear_for_user(user.id)
+    if allowed_models is None:
+        await access_repo.set_mode(user.id, "all")
+        meta_models: list[str] | None = None
+    else:
+        await access_repo.set_mode(user.id, "list")
         for model_id in sorted(set(allowed_models)):
-            await repo.set_permission(user.id, model_id, True)
+            await permission_repo.set_permission(user.id, model_id, True)
+        meta_models = sorted(set(allowed_models))
     await audit(
         session,
         actor_id=actor_id,
         action=MODEL_PERMISSION_CHANGED,
         target_type="user",
         target_id=str(telegram_user_id),
-        metadata={"allowed_models": sorted(set(allowed_models)) if allowed_models else None},
+        metadata={
+            "mode": "all" if allowed_models is None else "list",
+            "allowed_models": meta_models,  # [] и None различимы в аудите
+        },
+    )
+
+
+async def set_model_enabled(
+    session: AsyncSession,
+    *,
+    actor_id: int,
+    model_id: str,
+    enabled: bool,
+) -> None:
+    """DB-override enabled модели (model_overrides) + audit."""
+    await ModelOverrideRepository(session).set_enabled(model_id, enabled)
+    await audit(
+        session,
+        actor_id=actor_id,
+        action=MODEL_ENABLED_CHANGED,
+        target_type="model",
+        target_id=model_id,
+        metadata={"enabled": enabled},
     )

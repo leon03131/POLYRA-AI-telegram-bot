@@ -1,0 +1,300 @@
+{
+  "package": "POLYRA_KIMI_HANDOFF_V2",
+  "version": 2,
+  "prepared_date": "2026-09-24",
+  "purpose": "Updated remediation handoff, not patched bot source.",
+  "historical_audit_findings": 40,
+  "new_user_requirements": [
+    "N01",
+    "N02",
+    "N03",
+    "N04"
+  ],
+  "agent_profiles": 8,
+  "max_active_subagents_required": 4,
+  "minimum_baseline_models_after_addition": 10,
+  "historical_files_preserved": 28,
+  "baseline_zip_sha256": "37f7f26dc7503319db3b7bc90136f273cde3003a4ebaae54e39157f892ef6294",
+  "original_requirements_sha256": "15d28d70c78c15473384edd36f73d6baa466db84f848f6fc01b404959380d2e3",
+  "code_fixes_performed": false,
+  "new_full_audit_performed": false,
+  "live_opencode_test_performed": false,
+  "live_provider_calls_performed": false,
+  "files_excluding_this_manifest": [
+    {
+      "path": "ACCEPTANCE_ADDENDUM.md",
+      "bytes": 8010,
+      "sha256": "24ddeed47fd3555599eb3b0d5fa55717cbfd8e18c4576ea61bff6611d25b94ee"
+    },
+    {
+      "path": "AGENTS_APPEND.md",
+      "bytes": 1891,
+      "sha256": "18c118cc7d83d3da0b216f76f34451fb0c8f0fe470a951f4a30368bd63ab869f"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "bytes": 3249,
+      "sha256": "7215f791764a897eb318bfbaffd6416a8c84467f68b4a5aa325f9a70f5bee428"
+    },
+    {
+      "path": "KIMI_FIX_PROMPT.txt",
+      "bytes": 116539,
+      "sha256": "67330c39a42b7ba3a7459de3bac083a42afae954b8ab011ea00bf849f4cc047b"
+    },
+    {
+      "path": "KIMI_START_MESSAGE.txt",
+      "bytes": 2055,
+      "sha256": "f8d53174cbe822a9f1fed30da8c43b6ea2819a2c19ea7b9f6e81ccb464472fea"
+    },
+    {
+      "path": "OFFICIAL_SOURCES_2026-09-24.md",
+      "bytes": 5668,
+      "sha256": "078076ec604b1c0de7160993be31447cefbb7c398a37c68c65dc35aef985cd09"
+    },
+    {
+      "path": "OPENCODE_SETUP.md",
+      "bytes": 5653,
+      "sha256": "a04f022a7a9df2d2b1d6568f9626f0823018957380e3c39622686281ba68ad69"
+    },
+    {
+      "path": "PACKAGE_CHECKS.md",
+      "bytes": 3250,
+      "sha256": "0924ccea12c730bdad95671681b497bc0ae32f7e8ecc6801569ce0b9ba3f6a3e"
+    },
+    {
+      "path": "REQUIREMENTS_ADDENDUM.md",
+      "bytes": 20606,
+      "sha256": "8d3c76c72c1c0e2be29f89791a64e586ce2b0a15eda4be0d1f7ecfbba27558f7"
+    },
+    {
+      "path": "START_HERE_RU.md",
+      "bytes": 5664,
+      "sha256": "9e9d71335224d3b2893cda6069006d0bb96ff215d72bf85208dc142d80af3f7a"
+    },
+    {
+      "path": "SUBAGENT_PLAN.md",
+      "bytes": 8027,
+      "sha256": "86bca81dd7aa0d825d2e8c70f2197f21a401248fe5c5d7e0d59522bf552d9dab"
+    },
+    {
+      "path": "audit_original/AUDIT.md",
+      "bytes": 92630,
+      "sha256": "8044727c41e64dd2ee14d16ba9e376179c3654a753613a39fd421a5a06c4756e"
+    },
+    {
+      "path": "audit_original/CODE_EVIDENCE.md",
+      "bytes": 124709,
+      "sha256": "c8de512762e4b5609ca7a5e13bb1c012e3764f718e450e7dbf94c9aaf0253482"
+    },
+    {
+      "path": "audit_original/FILE_REVIEW.md",
+      "bytes": 50437,
+      "sha256": "c38391e1f1cb6a9c050e4121f3b259ffb05ccf7f954b98a8d4e29cb615030f4e"
+    },
+    {
+      "path": "audit_original/KIMI_FIX_PROMPT.txt",
+      "bytes": 79352,
+      "sha256": "2231141685421d2a1a36f96297129eee0175442f886e571ee9c01523af911b87"
+    },
+    {
+      "path": "audit_original/MANIFEST.json",
+      "bytes": 4903,
+      "sha256": "05b6b4b7a91ca426f34a12a0225899050f20b371a2cc16f2f4fda66ebfa4da19"
+    },
+    {
+      "path": "audit_original/OFFICIAL_SOURCES.md",
+      "bytes": 2755,
+      "sha256": "e9a18583409209e7e9f23d68d4c2bf9f587ab3ff56252f66b8947fd093e4cee1"
+    },
+    {
+      "path": "audit_original/ORIGINAL_REQUIREMENTS.txt",
+      "bytes": 58091,
+      "sha256": "15d28d70c78c15473384edd36f73d6baa466db84f848f6fc01b404959380d2e3"
+    },
+    {
+      "path": "audit_original/README.md",
+      "bytes": 2903,
+      "sha256": "1b38ba1ccaf9a0b4789051916c4391a6b7dc7473ca569a2178320de8b18bffdd"
+    },
+    {
+      "path": "audit_original/REQUIREMENTS_MATRIX.md",
+      "bytes": 11246,
+      "sha256": "dc4ec502d8175f84b84fe2332e458e2ca1bdff0c5e48959ab724ec0f96468a10"
+    },
+    {
+      "path": "audit_original/TEST_RESULTS.md",
+      "bytes": 5209,
+      "sha256": "5bd12f2ed07dab65d0415466b6bbe8f4283dc0c9ec7845d600f8143eca24ba37"
+    },
+    {
+      "path": "audit_original/evidence/additional_checks.json",
+      "bytes": 621,
+      "sha256": "e5a9e532c828e690a902d1a913635ca757cdee60fe3edf70209f59712790ab1e"
+    },
+    {
+      "path": "audit_original/evidence/alembic_offline.log",
+      "bytes": 1142,
+      "sha256": "1ec471239d157ec936b1d18eb31313655096f2dad6c5f9480c8561d1974fc566"
+    },
+    {
+      "path": "audit_original/evidence/alembic_upgrade.sql",
+      "bytes": 13322,
+      "sha256": "eb9a804d6d53fbc9f9ae88dc3c1938720d2f7fd851c7c8e177656345f7bad091"
+    },
+    {
+      "path": "audit_original/evidence/install.log",
+      "bytes": 3550,
+      "sha256": "3324a2233923e64ebebf62e6613ce1c5439343565c7bf5f1420a41f56d865185"
+    },
+    {
+      "path": "audit_original/evidence/inventory.json",
+      "bytes": 36209,
+      "sha256": "a34949a2af7dab04e2a9ffc890fcb7019c0f5bbf5026eff3119f8ecce4912373"
+    },
+    {
+      "path": "audit_original/evidence/npm_alternate_cache.log",
+      "bytes": 286,
+      "sha256": "26ab043c64f1990752f41b351720f4a0832f829b7424bd02dabb32a8cace8061"
+    },
+    {
+      "path": "audit_original/evidence/npm_install.log",
+      "bytes": 290,
+      "sha256": "a3b15c21410434b84cd647f11e8a1f372dd658e68187773246f0ec143e331cad"
+    },
+    {
+      "path": "audit_original/evidence/pytest_available.log",
+      "bytes": 340,
+      "sha256": "78faa97ca0a1f2a25f525300c41da47b0c8a81ef97c6df848c04abb8cfef0e42"
+    },
+    {
+      "path": "audit_original/evidence/pytest_collection.log",
+      "bytes": 24921,
+      "sha256": "d1df52c6ad269648daad81def31ae895a6830e936ad066efff4cbc44d4035e7a"
+    },
+    {
+      "path": "audit_original/evidence/reproduced.json",
+      "bytes": 1593,
+      "sha256": "e4e7f824e9768c901e8c66c59f693416039a952e174c307986ed2f4d8eb64fc8"
+    },
+    {
+      "path": "audit_original/evidence/secret_pattern_scan.json",
+      "bytes": 155,
+      "sha256": "bee85de422606100626a2942b0ee5e94880ec7f4346c1e9f55b98c8e220bc37f"
+    },
+    {
+      "path": "audit_original/evidence/static_analysis.json",
+      "bytes": 344307,
+      "sha256": "a99f501bd8c2ae2a1e853bdab7d136aa87ab43bf25a572b38917cdab528d2d4b"
+    },
+    {
+      "path": "audit_original/evidence/typescript_syntax.json",
+      "bytes": 3445,
+      "sha256": "45dfdeb3399ad700fcacc317bcdefa6f0569c1b15eb0de5bda9e6b8bfedabb7d"
+    },
+    {
+      "path": "audit_original/findings.json",
+      "bytes": 77889,
+      "sha256": "56c38472bc0bc302f81521f5057704a50b5c364f0c92da90f87c37cdb6bb4d0a"
+    },
+    {
+      "path": "audit_original/regressions/README.md",
+      "bytes": 2684,
+      "sha256": "691a3ad60c93606014dd46ceb3b327fa2ff0d564bd70f5c462a8eb236927e2d9"
+    },
+    {
+      "path": "audit_original/regressions/additional_checks.py",
+      "bytes": 3304,
+      "sha256": "ece8b4a172fafce25af4cdfbf84006752b1bb6e7268998ef27eab76bbd0dda3f"
+    },
+    {
+      "path": "audit_original/regressions/reproduce_findings.py",
+      "bytes": 8377,
+      "sha256": "e262ac14fbd11a7a50a84689a14af7a296c91172f61207a8660b30cded67b86a"
+    },
+    {
+      "path": "audit_original/regressions/static_audit.py",
+      "bytes": 3378,
+      "sha256": "fa6d0151b71bdd5e37f4c2cfa3a7e94c5e227c4e126abb42ca8cd3065bc2180f"
+    },
+    {
+      "path": "install_opencode_agents.py",
+      "bytes": 4203,
+      "sha256": "315259f207fb961eb696e353cbb59215277372ef7f18dc65fb24067b8f3848fe"
+    },
+    {
+      "path": "opencode-overlay/.opencode/agents/polyra-alibaba.md",
+      "bytes": 3956,
+      "sha256": "38244655fe8043ae41a8c95569e71b46c5d1a029c6f194b859a4f6a04311b096"
+    },
+    {
+      "path": "opencode-overlay/.opencode/agents/polyra-context.md",
+      "bytes": 3703,
+      "sha256": "5bf8ef14a873d3899eaf548235e41526e0caa68c23b4d2ca6c8e5071d08f2485"
+    },
+    {
+      "path": "opencode-overlay/.opencode/agents/polyra-db-api.md",
+      "bytes": 3885,
+      "sha256": "c718c83e1b8f48896f336ce1f4e28e5fca6552d763ffedb1e1c95bfefc56dce8"
+    },
+    {
+      "path": "opencode-overlay/.opencode/agents/polyra-gemini.md",
+      "bytes": 3728,
+      "sha256": "84b96cbd3129c96c0f2c7d4e29c52f7d83d922ea12b3d4e3e663122828ce36ec"
+    },
+    {
+      "path": "opencode-overlay/.opencode/agents/polyra-miniapp.md",
+      "bytes": 3694,
+      "sha256": "f3998be87e01448066ced45058c332e892e416d470de0c4bc8197f90f8d63d76"
+    },
+    {
+      "path": "opencode-overlay/.opencode/agents/polyra-qa-release.md",
+      "bytes": 3895,
+      "sha256": "eec336dfe9e9ec7dca6600388390d559a5a04452bfd33e921d77c2c82dad04e3"
+    },
+    {
+      "path": "opencode-overlay/.opencode/agents/polyra-search-security.md",
+      "bytes": 3639,
+      "sha256": "669a08e8c5d42df85e13474c589cee1dc06f126b7202e67507aa5d80e5117173"
+    },
+    {
+      "path": "opencode-overlay/.opencode/agents/polyra-telegram.md",
+      "bytes": 3633,
+      "sha256": "8ff052d55712f124aebe1bba057fa5b25c5289eefd99d7561d47477628c4ea96"
+    },
+    {
+      "path": "package_checks/results.json",
+      "bytes": 867,
+      "sha256": "002d277fbbfc32ecbd4160f9f22da69da9a7dd5ddf4ab4602a1497863a8e314d"
+    },
+    {
+      "path": "reference/AUDITED_SOURCE_SNAPSHOT.zip",
+      "bytes": 412581,
+      "sha256": "37f7f26dc7503319db3b7bc90136f273cde3003a4ebaae54e39157f892ef6294"
+    },
+    {
+      "path": "sources.json",
+      "bytes": 2458,
+      "sha256": "3904b25ec2d6ea4d4d4f05624df7ba8dcb28d6f258f0cd779051172afd40aee6"
+    },
+    {
+      "path": "tracking/DISPATCH_TEMPLATE.md",
+      "bytes": 1117,
+      "sha256": "81b23fcc0cd572cd3cd03a7344e27686256fbc1fae3bf59b838aedb1e1681eed"
+    },
+    {
+      "path": "tracking/FIX_REPORT_TEMPLATE.md",
+      "bytes": 8648,
+      "sha256": "0e5673bd3330bc1225480eae6e2b696f19b36c564d8905f4128e8f6885bcf16d"
+    },
+    {
+      "path": "tracking/MODEL_REGRESSION_MATRIX.md",
+      "bytes": 3361,
+      "sha256": "f6397a96653916100cf4f1e1ea389410a80f6e360409208532e5c2c1151b7677"
+    },
+    {
+      "path": "tracking/WORK_ITEMS.json",
+      "bytes": 19837,
+      "sha256": "28c8973ff2c4f6d2543d7c3b82501dd36df50318fd1b6d5317dc0a17b15be47b"
+    }
+  ]
+}

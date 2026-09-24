@@ -62,6 +62,13 @@ class ToolRunner:
         """Исполнить вызов. Исключения наружу не выходят (кроме отмены задачи)."""
         started = time.perf_counter()
 
+        # A12: enforcement effective tools ДО любого lookup/выполнения/сети.
+        allowed = context.allowed_tool_names
+        if allowed is not None and call.name not in allowed:
+            return await self._finish(
+                call, context, "denied", "Tool not allowed", started, generation_run_id
+            )
+
         tool = self._registry.get(call.name)
         if tool is None:
             return await self._finish(

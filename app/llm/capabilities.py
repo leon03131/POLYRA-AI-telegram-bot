@@ -126,6 +126,18 @@ ALIBABA_MODELS: tuple[ModelDefinition, ...] = (
     ),
     ModelDefinition(
         provider="alibaba",
+        model_id="deepseek-v4-pro",
+        display_name="DeepSeek V4 Pro",
+        input_modalities=frozenset({"text"}),  # vision НЕТ (docs 2026-09-24)
+        max_context=1_000_000,
+        max_output=393_216,  # 384K, страница модели
+        thinking_modes=(THINKING_OFF, THINKING_HIGH, THINKING_MAX),
+        # LOW отдельно НЕ показываем: у стабильного ID low — alias на high
+        # (native только high/max, chat-ref 2026-09-22).
+        default_thinking=None,  # provider default = thinking ON (effort high)
+    ),
+    ModelDefinition(
+        provider="alibaba",
         model_id="glm-5.3",
         display_name="GLM 5.3",
         input_modalities=frozenset({"text"}),  # vision НЕТ

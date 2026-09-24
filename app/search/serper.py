@@ -9,6 +9,7 @@ import httpx
 from app.search.base import (
     SEARCH_TIMEOUT,
     BackendUnavailableError,
+    SearchBackendError,
     SearchOptions,
     SearchResult,
     hostname_of,
@@ -55,19 +56,30 @@ class SerperBackend:
             },
         )
         payload = parse_json(response, self.backend_id)
-        organic = payload.get("organic") if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            raise SearchBackendError(f"{self.backend_id}: unexpected payload (not an object)")
+        organic = payload.get("organic")
+        if organic is None:
+            organic = []
+        if not isinstance(organic, list):
+            raise SearchBackendError(f"{self.backend_id}: unexpected 'organic' (not a list)")
         results: list[SearchResult] = []
-        for item in (organic or [])[: options.max_results]:
-            link = item.get("link")
-            if not link:
+        for item in organic[: options.max_results]:
+            if not isinstance(item, dict):
                 continue
+            link = item.get("link")
+            if not isinstance(link, str) or not link:
+                continue
+            title = item.get("title")
+            snippet = item.get("snippet")
+            date = item.get("date")
             results.append(
                 SearchResult(
-                    title=item.get("title") or "",
+                    title=title if isinstance(title, str) else "",
                     url=link,
-                    snippet=item.get("snippet") or "",
+                    snippet=snippet if isinstance(snippet, str) else "",
                     source=hostname_of(link),
-                    published_at=item.get("date"),
+                    published_at=date if isinstance(date, str) else None,
                 )
             )
         return results

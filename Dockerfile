@@ -57,4 +57,5 @@ EXPOSE 8080
 
 # Apply DB migrations (alembic reads DATABASE_URL from env), then start
 # the app: bot long polling + Mini App API in a single process.
-CMD ["sh", "-c", "alembic upgrade head && python -m app.main"]
+# exec: python становится PID 1 и получает SIGTERM напрямую (корректный shutdown).
+CMD ["sh", "-c", "alembic upgrade head && exec python -m app.main"]

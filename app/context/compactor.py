@@ -9,6 +9,7 @@ Raw history в PostgreSQL НЕ удаляется и НЕ заменяется �
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -61,6 +62,20 @@ _SUMMARY_LIST_KEYS = (
     "entities",
 )
 
+# Сериализация compaction per chat_id: два compaction одного чата никогда
+# не идут параллельно (fire-and-forget задачи переживают генерацию).
+_COMPACTION_LOCKS: dict[str, asyncio.Lock] = {}
+
+# Ограничение рендера диалога в prompt compaction: длинный сегмент режется
+# по СЕРЕДИНЕ (голова и хвост сохраняются), с маркером пропуска.
+_MAX_DIALOG_CHARS = 12_000
+_ELISION_MARKER = "… [середина фрагмента пропущена: {count} сообщ.] …"
+
+
+def _chat_lock(chat_id: uuid.UUID) -> asyncio.Lock:
+    """Per-chat лок compaction (process-wide; ключ — строковый chat_id)."""
+    return _COMPACTION_LOCKS.setdefault(str(chat_id), asyncio.Lock())
+
 
 def extract_json_object(text: str) -> dict[str, Any] | None:
     """Вытащить JSON-объект из ответа модели (```json fence или голый JSON)."""
@@ -88,27 +103,61 @@ def _try_loads(candidate: str) -> Any:
         return None
 
 
-def _normalize_summary(data: dict[str, Any]) -> dict[str, Any]:
-    """Привести распарсенный JSON к канонической форме сводки."""
+def _normalize_summary(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Строгая валидация + каноническая форма сводки. None — невалидно.
 
-    def _str_list(key: str) -> list[str]:
+    Отклоняются: пустой dict, отсутствие обязательных ключей, неправильные
+    типы (conversation_summary — непустая строка; списки — list). Невалидная
+    сводка НЕ должна продвигать covered_until — вызывающий код трактует None
+    как неудачу compaction.
+    """
+    if not isinstance(data, dict) or not data:
+        return None
+    summary_text = data.get("conversation_summary")
+    if not isinstance(summary_text, str) or not summary_text.strip():
+        return None
+    result: dict[str, Any] = {"conversation_summary": summary_text.strip()}
+    for key in _SUMMARY_LIST_KEYS:
         raw = data.get(key)
         if not isinstance(raw, list):
-            return []
-        return [str(item) for item in raw if item]
-
-    summary_text = data.get("conversation_summary")
-    result: dict[str, Any] = {
-        "conversation_summary": summary_text.strip() if isinstance(summary_text, str) else "",
-    }
-    for key in _SUMMARY_LIST_KEYS:
-        result[key] = _str_list(key)
+            return None
+        result[key] = [str(item) for item in raw if item]
     return result
 
 
 def _message_text(message: Message) -> str:
     """Склеенный текст сообщения (только text parts)."""
     return " ".join(part.text for part in message.parts if part.type == "text" and part.text)
+
+
+def _cap_dialog(dialog_lines: list[str]) -> list[str]:
+    """Ограничить рендер диалога ~_MAX_DIALOG_CHARS, вырезая СЕРЕДИНУ с маркером.
+
+    Голова и хвост сегмента сохраняются (каждому — до половины лимита);
+    пропущенная середина помечается маркером с числом вырезанных сообщений.
+    Хвост (самые свежие сообщения сегмента) не теряется никогда, пока
+    отдельные строки короче половины лимита.
+    """
+    if sum(len(line) + 1 for line in dialog_lines) <= _MAX_DIALOG_CHARS:
+        return dialog_lines
+    half = _MAX_DIALOG_CHARS // 2
+    head: list[str] = []
+    used = 0
+    for line in dialog_lines:
+        if used + len(line) + 1 > half:
+            break
+        head.append(line)
+        used += len(line) + 1
+    tail: list[str] = []
+    used = 0
+    for line in reversed(dialog_lines):
+        if used + len(line) + 1 > half:
+            break
+        tail.append(line)
+        used += len(line) + 1
+    tail.reverse()
+    skipped = len(dialog_lines) - len(head) - len(tail)
+    return [*head, _ELISION_MARKER.format(count=max(1, skipped)), *tail]
 
 
 async def collect_text(llm_stream: LLMStreamFn, request: LLMRequest) -> str:
@@ -234,26 +283,64 @@ class ContextCompactor:
         self._min_segment = min_segment
 
     async def maybe_compact(self, chat_id: uuid.UUID) -> bool:
-        """Обновить сводку, если непокрытый сегмент ≥ min_segment. True — обновлена."""
-        state = await self._summaries.load(chat_id)
-        messages = await self._messages.list_all(chat_id)
-        segment, covered_count = self._segment(messages, state)
-        if len(segment) < self._min_segment:
-            return False
+        """Обновить сводку, если непокрытый сегмент ≥ min_segment. True — обновлена.
 
-        prompt = self._build_prompt(state.summary if state else None, segment)
-        data = await self._ask_json(prompt)
-        if data is None:
-            logger.warning("compaction: модель не вернула валидный JSON (chat %s)", chat_id)
-            return False
+        Сериализуется per chat_id: повторный вызов ждёт завершения текущего.
+        Невалидная/пустая сводка и откат boundary не сохраняются (False).
+        """
+        async with _chat_lock(chat_id):
+            state = await self._summaries.load(chat_id)
+            messages = await self._messages.list_all(chat_id)
+            segment, covered_count = self._segment(messages, state)
+            if len(segment) < self._min_segment:
+                return False
 
-        await self._summaries.save(
-            chat_id,
-            summary=_normalize_summary(data),
-            covered_until_message_id=segment[-1].id,
-            covered_messages_count=covered_count,
-        )
-        return True
+            prompt = self._build_prompt(state.summary if state else None, segment)
+            summary = await self._ask_json(prompt)
+            if summary is None:
+                logger.warning("compaction: модель не вернула валидную сводку (chat %s)", chat_id)
+                return False
+
+            new_covered_until = segment[-1].id
+            # Monotonic guard: boundary не откатываем. Перечитываем состояние —
+            # между snapshot и сохранением boundary мог продвинуть другой writer.
+            fresh = await self._summaries.load(chat_id)
+            if not self._boundary_is_forward(messages, fresh, new_covered_until):
+                logger.warning(
+                    "compaction: пропуск сохранения — boundary не продвигается (chat %s)",
+                    chat_id,
+                )
+                return False
+
+            await self._summaries.save(
+                chat_id,
+                summary=summary,
+                covered_until_message_id=new_covered_until,
+                covered_messages_count=covered_count,
+            )
+            return True
+
+    @staticmethod
+    def _boundary_is_forward(
+        messages: list[Message],
+        state: SummaryState | None,
+        new_covered_until: uuid.UUID,
+    ) -> bool:
+        """True, если новый boundary СТРОГО позже текущего (по позициям в ASC-истории).
+
+        Текущий covered_until, не найденный в истории (её чистили вручную),
+        считается устаревшим — новый boundary валиден (безопасный пересчёт).
+        """
+        if state is None or state.covered_until_message_id is None:
+            return True
+        positions = {str(message.id): index for index, message in enumerate(messages)}
+        current_index = positions.get(str(state.covered_until_message_id))
+        if current_index is None:
+            return True
+        new_index = positions.get(str(new_covered_until))
+        if new_index is None:
+            return False  # новый boundary обязан присутствовать в истории
+        return new_index > current_index
 
     def _segment(
         self, messages: list[Message], state: SummaryState | None
@@ -278,25 +365,35 @@ class ContextCompactor:
             lines.append(json.dumps(previous, ensure_ascii=False, indent=2))
             lines.append("")
         lines.append("Новый фрагмент диалога (в хронологическом порядке):")
+        dialog_lines = []
         for message in segment:
             text = _message_text(message)
             if text:
-                lines.append(f"{message.role}: {text}")
+                dialog_lines.append(f"{message.role}: {text}")
+        lines.extend(_cap_dialog(dialog_lines))
         return "\n".join(lines)
 
     async def _ask_json(self, prompt: str) -> dict[str, Any] | None:
-        """Запрос к summary-модели; при невалидном JSON — ровно один repair."""
+        """Запрос к summary-модели; невалидная сводка → ровно один repair.
+
+        Возвращает каноническую (провалидированную) сводку или None.
+        """
         text = await self._request_text(prompt)
         data = extract_json_object(text)
         if data is not None:
-            return data
+            summary = _normalize_summary(data)
+            if summary is not None:
+                return summary
         repair_prompt = (
-            "Твой предыдущий ответ не удалось распарсить как JSON. "
-            "Верни ТОЛЬКО валидный JSON-объект, без markdown и пояснений.\n\n"
+            "Твой предыдущий ответ не удалось распарсить как валидную сводку JSON. "
+            "Верни ТОЛЬКО валидный JSON-объект по заданной схеме, "
+            "без markdown и пояснений.\n\n"
             f"Предыдущий ответ:\n{text}"
         )
-        repaired = await self._request_text(repair_prompt)
-        return extract_json_object(repaired)
+        repaired = extract_json_object(await self._request_text(repair_prompt))
+        if repaired is None:
+            return None
+        return _normalize_summary(repaired)
 
     async def _request_text(self, prompt: str) -> str:
         request = LLMRequest(
