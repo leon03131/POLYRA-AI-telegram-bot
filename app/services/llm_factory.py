@@ -48,6 +48,7 @@ class ManagedLLMStream:
         self._gemini_provider = GeminiProvider(base_url=settings.gemini_base_url)
         self._pool = build_gemini_pool(session_factory, crypto)
         self._alibaba_providers: dict[str, AlibabaProvider] = {}  # кеш по api_key
+        self._graveyard: list[AlibabaProvider] = []  # устаревшие клиенты (до aclose)
         self._closed = False
 
     def __call__(self, request: LLMRequest) -> AsyncIterator[LLMEvent]:
@@ -79,11 +80,11 @@ class ManagedLLMStream:
         provider = self._alibaba_providers.get(api_key)
         if provider is not None:
             return provider
-        # Новый ключ — закрыть клиенты устаревших ключей (A14/A30).
+        # Новый ключ — старые клиенты НЕ закрываем немедленно (могут идти активные
+        # стримы через них — A30): уходят в graveyard, закрываются в aclose().
         if self._alibaba_providers:
-            for stale_provider in self._alibaba_providers.values():
-                await stale_provider.aclose()
-            logger.info("alibaba provider клиент закрыт (смена ключа)")
+            self._graveyard.extend(self._alibaba_providers.values())
+            logger.info("alibaba provider: клиент устаревшего ключа ушёл в graveyard")
             self._alibaba_providers.clear()
         provider = AlibabaProvider(api_key=api_key, base_url=self._settings.alibaba_base_url)
         self._alibaba_providers[api_key] = provider
@@ -98,6 +99,9 @@ class ManagedLLMStream:
         for provider in self._alibaba_providers.values():
             await provider.aclose()
         self._alibaba_providers.clear()
+        for provider in self._graveyard:
+            await provider.aclose()
+        self._graveyard.clear()
 
 
 def build_llm_stream(

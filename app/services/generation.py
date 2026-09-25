@@ -24,7 +24,7 @@ from aiogram.exceptions import TelegramAPIError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.bot.streaming.draft import MESSAGE_LIMIT, DraftStreamer, new_draft_id
+from app.bot.streaming.draft import MESSAGE_LIMIT, DraftStreamer, _split_text, new_draft_id
 from app.config import Settings
 from app.context import TokenBudgetManager
 from app.db.repositories import (
@@ -48,7 +48,7 @@ from app.llm.errors import (
 )
 from app.llm.events import Done, LLMEvent, ReasoningDelta, TextDelta, ToolCall, Usage
 from app.llm.gemini.pool import PoolExhaustedError
-from app.llm.registry import ModelRegistry, UnknownModelError
+from app.llm.registry import ModelRegistry
 from app.llm.tools.registry import ToolContext, ToolRegistry
 from app.llm.tools.runner import ToolExecution, ToolRunner
 from app.llm.tools.schemas import make_llm_tools
@@ -166,6 +166,7 @@ class _PreparedGeneration:
     web_enabled: bool = False
     max_output_tokens: int | None = None
     llm_tools: list[LLMTool] | None = None
+    memory_min_chars: int | None = None  # effective (DB) — A13
 
 
 def user_error_message(exc: BaseException, model_display: str) -> str:
@@ -200,11 +201,10 @@ def resolve_model_and_thinking(
     thinking_modes модели → None (дефолт провайдера).
     """
     model_id = chat.model_id or user_settings.default_model_id or settings.default_model
-    try:
-        model_def = registry.get(model_id)
-    except UnknownModelError:
-        model_id = settings.default_model
-        model_def = registry.get(model_id)
+    # A25: никакого молчаливого fallback на другую модель. Неизвестный ID
+    # отклоняется выше по коду (явное сообщение пользователю) — здесь он просто
+    # пробрасывается; registry.get ниже упадёт с UnknownModelError, если просочится.
+    model_def = registry.get(model_id)
     thinking = chat.thinking_setting or user_settings.default_thinking or model_def.default_thinking
     if thinking is not None and thinking not in model_def.thinking_modes:
         thinking = None
@@ -299,6 +299,16 @@ class _ConsumeState:
             self.usage = event
 
 
+def _attempt_fields(attempts: list[str], attempt_ids: list[str]) -> dict[str, Any]:
+    """A07: попытки пула → поля run (attempts JSONB + последний gemini_project_id)."""
+    fields: dict[str, Any] = {}
+    if attempts:
+        fields["attempts"] = attempts
+    if attempt_ids:
+        fields["gemini_project_id"] = uuid.UUID(attempt_ids[-1])
+    return fields
+
+
 def extract_user_text(parts: list[dict[str, Any]]) -> str:
     """Склеенный текст text-parts текущего сообщения (для title/compaction)."""
     return " ".join(
@@ -317,11 +327,24 @@ def build_messages(
     """
     messages: list[dict[str, Any]] = []
     for message in history:
-        parts = [
-            {"type": "text", "text": part.text or ""}
-            for part in message.parts
-            if part.type == "text"
-        ]
+        # Legacy-путь (без builder): text + image с bytes; image без bytes →
+        # текстовый плейсхолдер (не теряем факт фото).
+        parts: list[dict[str, Any]] = []
+        for part in message.parts:
+            if part.type == "text":
+                parts.append({"type": "text", "text": part.text or ""})
+            elif part.type == "image":
+                data_base64 = getattr(part, "data_base64", None)
+                if data_base64:
+                    parts.append(
+                        {
+                            "type": "image",
+                            "data_base64": data_base64,
+                            "mime_type": part.mime_type or "image/jpeg",
+                        }
+                    )
+                else:
+                    parts.append({"type": "text", "text": "[изображение]"})
         if parts:
             messages.append({"role": message.role, "parts": parts})
     messages.append({"role": "user", "parts": current_parts})
@@ -422,7 +445,14 @@ class GenerationService:
                 return  # ошибка уже обработана внутри (fail + save_failed)
             final_outcome, tool_records, attempts, attempt_ids = loop_result
             if final_outcome.cancelled:
-                await self._save_cancelled(prepared, final_outcome, bot=bot, tg_chat_id=tg_chat_id)
+                await self._save_cancelled(
+                    prepared,
+                    final_outcome,
+                    bot=bot,
+                    tg_chat_id=tg_chat_id,
+                    attempts=attempts,
+                    attempt_ids=attempt_ids,
+                )
             elif not final_outcome.text.strip():
                 # Модель завершилась без видимого текста (напр. весь вывод ушёл в
                 # мысли или потерянный tool call) — пользователь не должен молча
@@ -433,7 +463,12 @@ class GenerationService:
                 await streamer.fail(
                     f"🤔 {prepared.model_display} вернула пустой ответ. Попробуйте ещё раз."
                 )
-                await self._save_failed(prepared, ValueError("empty final text"))
+                await self._save_failed(
+                    prepared,
+                    ValueError("empty final text"),
+                    attempts=attempts,
+                    attempt_ids=attempt_ids,
+                )
             else:
                 sources = collect_sources(tool_records) if self._settings.show_sources else []
                 if sources and "Источники" not in final_outcome.text:
@@ -441,7 +476,13 @@ class GenerationService:
                     await streamer.append(suffix)
                     final_outcome.text += suffix
                 await streamer.finalize()
-                await self._save_completed(prepared, final_outcome, tool_records)
+                await self._save_completed(
+                    prepared,
+                    final_outcome,
+                    tool_records,
+                    attempts=attempts,
+                    attempt_ids=attempt_ids,
+                )
                 self._schedule_maintenance(prepared, final_outcome)
         finally:
             self._generations.pop(tg_chat_id, prepared.draft_id)
@@ -523,6 +564,7 @@ class GenerationService:
         current_parts: list[dict[str, Any]],
         tool_defs: list[Any],
         effective_settings: Settings,
+        exclude_message_id: uuid.UUID | None = None,
     ) -> tuple[list[dict[str, Any]], str, bool, int | None] | None:
         """Собрать контекст (builder/legacy). None — отказ отправлен пользователю."""
         tools_estimate = sum(
@@ -539,9 +581,20 @@ class GenerationService:
         if summary_row is not None:
             # A15: вся непокрытая история, а не только хвост лимита
             history = await messages_repo.list_all(chat_id)
-            if model_def.supports_images:
-                await self._rehydrate_images(history, bot)
-        built = self._context_builder.build(
+            if exclude_message_id is not None:
+                # A15: только что записанное user-сообщение не дублируем — оно
+                # добавляется отдельно как current.
+                history = [m for m in history if m.id != exclude_message_id]
+        if model_def.supports_images:
+            # A18: rehydration ВСЕГДА для image-capable моделей, не только при summary.
+            await self._rehydrate_images(history, bot)
+        # A13: builder на effective (DB) настройках текущего запроса, не env-снимке.
+        builder = ContextBuilder(
+            TokenBudgetManager(),
+            keep_recent=effective_settings.context_keep_recent,
+            trigger_ratio=effective_settings.context_trigger_ratio,
+        )
+        built = builder.build(
             model=model_def,
             base_system_prompt=base_system_prompt,
             summary_json=summary_row.summary if summary_row is not None else None,
@@ -636,12 +689,12 @@ class GenerationService:
             except (ProviderError, PoolExhaustedError) as exc:
                 logger.info("generation failed (run %s): %s", prepared.run_id, exc)
                 await streamer.fail(user_error_message(exc, prepared.model_display))
-                await self._save_failed(prepared, exc)
+                await self._save_failed(prepared, exc, attempts=attempts, attempt_ids=attempt_ids)
                 return None
             except Exception as exc:
                 logger.exception("generation crashed (run %s)", prepared.run_id)
                 await streamer.fail(user_error_message(exc, prepared.model_display))
-                await self._save_failed(prepared, exc)
+                await self._save_failed(prepared, exc, attempts=attempts, attempt_ids=attempt_ids)
                 return None
 
             if outcome.usage is not None:
@@ -705,10 +758,11 @@ class GenerationService:
             jina_reader=await self._resolve_jina_reader(),
             allowed_tool_names=frozenset(t.name for t in (llm_tools or [])),
         )
-        # A39: полный assistant turn — видимый текст раунда + вызовы (signatures).
-        messages.append(self._assistant_tool_message(outcome.tool_calls, outcome.text))
-        # A39: лимит вызовов в одном batch.
+        # A39: полный assistant turn — видимый текст раунда + ИСПОЛНЯЕМЫЕ вызовы.
+        # Неисполненные (сверх max_tool_calls_per_round) НЕ попадают в историю —
+        # иначе следующий запрос несёт tool_call без tool_result → 400 провайдера.
         round_calls = outcome.tool_calls[: self._settings.max_tool_calls_per_round]
+        messages.append(self._assistant_tool_message(round_calls, outcome.text))
         for call in round_calls:
             # A11: отмена проверяется ПЕРЕД каждым side effect, не после пачки.
             if cancellation.is_set():
@@ -807,6 +861,7 @@ class GenerationService:
                     chat_id=prepared.chat_id,
                     user_text=prepared.user_text,
                     assistant_text=outcome.text,
+                    min_chars=prepared.memory_min_chars,
                 ),
                 label="memory_extraction",
             )
@@ -935,7 +990,7 @@ class GenerationService:
             history = await messages_repo.list_recent(
                 chat_id, limit=self._settings.recent_history_limit * 2
             )
-            await messages_repo.add_message(chat_id, "user", parts=current_parts)
+            new_message = await messages_repo.add_message(chat_id, "user", parts=current_parts)
             await ChatRepository(session).touch(chat_id)
 
             user_settings = await UserSettingsRepository(session).get_or_create(user.id)
@@ -1033,6 +1088,7 @@ class GenerationService:
                 current_parts=current_parts,
                 tool_defs=tool_defs,
                 effective_settings=effective_settings,
+                exclude_message_id=new_message.id,
             )
             if context_result is None:
                 return None  # не влезает — пользователь уже получил отказ
@@ -1074,6 +1130,7 @@ class GenerationService:
             web_enabled=web_enabled,
             max_output_tokens=max_output_tokens,
             llm_tools=llm_tools,
+            memory_min_chars=effective_settings.memory_extraction_min_chars,
         )
 
     async def _save_completed(
@@ -1081,6 +1138,8 @@ class GenerationService:
         prepared: _PreparedGeneration,
         outcome: StreamOutcome,
         tool_records: list[tuple[ToolCall, ToolExecution]] | None = None,
+        attempts: list[str] | None = None,
+        attempt_ids: list[str] | None = None,
     ) -> None:
         """Финал нормы: assistant message (done) + run completed + commit."""
         usage = outcome.usage
@@ -1123,6 +1182,7 @@ class GenerationService:
                     output_tokens=usage.output_tokens if usage else None,
                     reasoning_tokens=usage.reasoning_tokens if usage else None,
                     tool_calls_count=outcome.tool_calls_count,
+                    **_attempt_fields(attempts or [], attempt_ids or []),
                 )
                 await session.commit()
         except IntegrityError:
@@ -1139,13 +1199,18 @@ class GenerationService:
         *,
         bot: Bot,
         tg_chat_id: int,
+        attempts: list[str] | None = None,
+        attempt_ids: list[str] | None = None,
     ) -> None:
         """Финал отмены: partial обычным сообщением + assistant message cancelled."""
         partial = outcome.text
         if partial:
-            text = partial if len(partial) <= MESSAGE_LIMIT else partial[: MESSAGE_LIMIT - 1] + "…"
+            # A20: plain partial с parse_mode=None (бот по умолчанию HTML — иначе
+            # «<»/незакрытый тег из LLM-текста = BadRequest и partial теряется).
+            # A21: полный partial разбивается по лимитам, не обрезается одним фрагментом.
             try:
-                await bot.send_message(tg_chat_id, text)
+                for part in _split_text(partial, MESSAGE_LIMIT):
+                    await bot.send_message(tg_chat_id, part, parse_mode=None)
             except TelegramAPIError:
                 logger.exception("не удалось отправить partial в чат %s", tg_chat_id)
         usage = outcome.usage
@@ -1173,6 +1238,7 @@ class GenerationService:
                     output_tokens=usage.output_tokens if usage else None,
                     reasoning_tokens=usage.reasoning_tokens if usage else None,
                     tool_calls_count=outcome.tool_calls_count,
+                    **_attempt_fields(attempts or [], attempt_ids or []),
                 )
                 await session.commit()
         except IntegrityError:
@@ -1181,7 +1247,14 @@ class GenerationService:
                 "chat %s удалён во время генерации — пропускаю персистенс", prepared.chat_id
             )
 
-    async def _save_failed(self, prepared: _PreparedGeneration, exc: BaseException) -> None:
+    async def _save_failed(
+        self,
+        prepared: _PreparedGeneration,
+        exc: BaseException,
+        *,
+        attempts: list[str] | None = None,
+        attempt_ids: list[str] | None = None,
+    ) -> None:
         """Финал ошибки: run failed (category/code); assistant message не создаётся."""
         if isinstance(exc, ProviderError):
             error_category: str | None = exc.category.value
@@ -1198,5 +1271,6 @@ class GenerationService:
                 status="failed",
                 error_category=error_category,
                 error_code=error_code,
+                **_attempt_fields(attempts or [], attempt_ids or []),
             )
             await session.commit()

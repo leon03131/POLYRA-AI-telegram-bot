@@ -138,7 +138,10 @@ def _format_search_outcome(outcome: Any) -> str:
         if getattr(result, "url", None)
     ]
     parts: list[str] = []
+    # A32: SOURCES — ПЕРВОЙ частью: обрезка max_result_size режет хвост,
+    # citations обязаны пережить truncation.
     if results:
+        parts.append("SOURCES: " + " | ".join(result.url for result in results))
         parts.append(
             "\n\n".join(
                 f"{index}. {result.title}\n{result.url}\n{result.snippet}"
@@ -148,8 +151,6 @@ def _format_search_outcome(outcome: Any) -> str:
     overview = getattr(outcome, "ai_overview_text", None)
     if overview:
         parts.append(f"AI Overview (не доверяй без источников): {overview}")
-    if results:
-        parts.append("SOURCES: " + " | ".join(result.url for result in results))
     return "\n\n".join(parts) if parts else "ничего не найдено"
 
 

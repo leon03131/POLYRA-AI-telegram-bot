@@ -74,17 +74,13 @@ function ChatRow({ chat, disabled, onOpen, onRename, onArchive, onDelete }: Chat
   );
 }
 
-const PAGE_SIZE = 20;
-
 export function ChatsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [activeLimit, setActiveLimit] = useState(PAGE_SIZE);
   const [archiveOpen, setArchiveOpen] = useState(false);
-  const [archiveLimit, setArchiveLimit] = useState(PAGE_SIZE);
 
-  const chatsQ = useChats({ limit: activeLimit });
-  const archivedQ = useChats({ limit: archiveLimit, include_archived: true, enabled: archiveOpen });
+  const chatsQ = useChats();
+  const archivedQ = useChats({ include_archived: true, enabled: archiveOpen });
   const invalidate = () => void qc.invalidateQueries({ queryKey: qk.chats });
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -151,13 +147,18 @@ export function ChatsPage() {
     );
   }
 
-  const active = chatsQ.data?.chats ?? [];
-  const activeTotal = chatsQ.data?.total ?? active.length;
-  const hasMoreActive = active.length < activeTotal;
+  const activePages = chatsQ.data?.pages ?? [];
+  const active = activePages.flatMap((p) => p.chats);
+  const activeTotal =
+    activePages.length > 0 ? activePages[activePages.length - 1].total : active.length;
+  const hasMoreActive = chatsQ.hasNextPage ?? false;
 
-  const archivedAll = archivedQ.data?.chats ?? [];
+  const archivedPages = archivedQ.data?.pages ?? [];
+  const archivedAll = archivedPages.flatMap((p) => p.chats);
+  const archivedTotal =
+    archivedPages.length > 0 ? archivedPages[archivedPages.length - 1].total : archivedAll.length;
   const archived = archivedAll.filter((c) => c.archived_at !== null);
-  const hasMoreArchived = archiveOpen && archivedQ.data !== undefined && archivedAll.length < archivedQ.data.total;
+  const hasMoreArchived = archiveOpen && (archivedQ.hasNextPage ?? false);
 
   const busy =
     openChat.isPending ||
@@ -195,8 +196,8 @@ export function ChatsPage() {
               <Button
                 size="small"
                 variant="secondary"
-                loading={chatsQ.isFetching}
-                onClick={() => setActiveLimit((v) => v + PAGE_SIZE)}
+                loading={chatsQ.isFetchingNextPage}
+                onClick={() => void chatsQ.fetchNextPage()}
               >
                 Загрузить ещё ({active.length} из {activeTotal})
               </Button>
@@ -228,11 +229,11 @@ export function ChatsPage() {
                 <Button
                   size="small"
                   variant="secondary"
-                  loading={archivedQ.isFetching}
-                onClick={() => setArchiveLimit((v) => v + PAGE_SIZE)}
-              >
-                Загрузить ещё
-              </Button>
+                  loading={archivedQ.isFetchingNextPage}
+                  onClick={() => void archivedQ.fetchNextPage()}
+                >
+                  Загрузить ещё ({archivedAll.length} из {archivedTotal})
+                </Button>
               </div>
             )}
           </>

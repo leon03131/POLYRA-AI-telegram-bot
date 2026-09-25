@@ -9,8 +9,8 @@ FastAPI, PostgreSQL 16.
 
 - **Модели**: Gemini 3.8 / 3.7 / 3.6 Flash (через пул проектов Google AI Studio
   с ротацией, квотами RPM/TPM/RPD и failover), Qwen 3.8 Flash / Max,
-  DeepSeek V4.1 Flash, GLM 5.3, Kimi K3 (Alibaba Cloud Model Studio,
-  OpenAI-compatible API).
+  DeepSeek V4.1 Flash, DeepSeek V4 Pro (text-only, thinking OFF/HIGH/MAX),
+  GLM 5.3, Kimi K3 (Alibaba Cloud Model Studio, OpenAI-compatible API).
 - **Стриминг ответов** прямо в сообщение Telegram (draft-обновления) с кнопкой
   **Stop** для отмены генерации.
 - **Фото**: сообщения с изображениями (vision-модели).
@@ -181,12 +181,14 @@ npm run dev                   # vite dev server; /api проксируется �
 | `ALIBABA_API_KEY` | — | Bootstrap-ключ Alibaba (основной путь — через админку) |
 | `DEFAULT_MODEL` | `gemini-3.8-flash` | Модель по умолчанию |
 | `DEFAULT_SYSTEM_PROMPT` | см. `app/config.py` | Системный промпт по умолчанию |
+| `SHOW_SOURCES` | `1` | Показывать блок «Источники», когда реально вызывался web_search (`0` — выкл) |
 | `LOG_LEVEL` | `INFO` | Уровень логирования |
 | `API_HOST` / `API_PORT` | `127.0.0.1` / `8080` | Адрес API (в образе `API_HOST=0.0.0.0`) |
 | `MINIAPP_DIST` | `miniapp/dist` | Каталог собранного Mini App |
 | `SESSION_TOKEN_TTL_SECONDS` | `900` | TTL сессионного токена Mini App |
 | `PHOTO_MAX_BYTES` | `15728640` | Лимит размера фото |
 | `MAX_TOOL_ITERATIONS` | `8` | Лимит раундов tool-calling loop |
+| `MAX_TOOL_CALLS_PER_ROUND` / `MAX_GENERATION_SECONDS` | `4` / `240` | Лимит вызовов tools в одном раунде / общий deadline генерации |
 | `RECENT_HISTORY_LIMIT` | `20` | Сообщений в «сырой» истории |
 | `CONTEXT_KEEP_RECENT` / `CONTEXT_TRIGGER_RATIO` / `COMPACTION_MIN_SEGMENT` | `10` / `0.7` / `6` | Параметры компакции контекста |
 | `SUMMARY_MODEL` / `SUMMARY_THINKING` | `gemini-3.5-flash-lite` / `medium` | Модель summary |
@@ -196,19 +198,29 @@ npm run dev                   # vite dev server; /api проксируется �
 
 Переменные compose (не уходят в контейнер приложения, только в подстановку):
 `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` (по умолчанию `aibot`),
-`APP_PORT` (по умолчанию `8080` — наружный порт), `DOMAIN` (для профиля caddy).
+`APP_BIND` (по умолчанию `127.0.0.1` — порт app слушает только localhost;
+`0.0.0.0` для отладки без Caddy), `APP_PORT` (по умолчанию `8080` — наружный
+порт), `DOMAIN` (для профиля caddy).
 
 ## Тесты и качество кода
 
 ```bash
-pytest                # unit-тесты (tests/unit), asyncio_mode=auto
-ruff check .          # линтер
-mypy .                # строгая типизация (app — strict; tests/alembic — послабления в pyproject)
+pytest tests -q         # unit + integration контракты (tests/), asyncio_mode=auto
+ruff check .            # линтер
+mypy app tests scripts  # строгая типизация (app — strict; tests — послабления в pyproject)
 ```
 
-Все тесты unit-уровня: сеть и реальные API-ключи не требуются. Интеграционные
-прогоны против живых провайдеров планируются позже под отдельными флагами
-окружения (вида `RUN_GEMINI_INTEGRATION`) — по умолчанию выключены.
+Весь набор offline: сеть, живая БД и реальные API-ключи не требуются
+(`tests/integration/` — контрактные тесты stream/pool/usage ledger на
+in-memory фейках и `httpx.MockTransport`). Live-проверка провайдеров —
+отдельный ручной прогон против реальных ключей (читает ключи из БД):
+
+```bash
+docker compose exec app python scripts/smoke_providers.py --provider all --strict
+```
+
+CI: `.github/workflows/ci.yml` гоняет python-гейты (ruff + mypy + pytest) и
+сборку Mini App на каждый push/PR.
 
 ## Безопасность
 
@@ -243,9 +255,10 @@ app/
   db/                модели, репозитории, migrations (alembic)
   observability/     логирование
 miniapp/             React + TS + Vite (Telegram Mini App)
-scripts/             import_gemini_keys.py — импорт ключей в пул Gemini
+scripts/             import_gemini_keys.py (импорт ключей в пул Gemini),
+                     smoke_providers.py (live capability probe провайдеров)
 docs/                API.md (контракт Mini App API), vendor-заметки
-tests/unit/          unit-тесты
+tests/               unit-тесты (unit/) + offline контрактные (integration/)
 Dockerfile, docker-compose.yml, Caddyfile, .dockerignore
 ```
 
@@ -256,8 +269,10 @@ Dockerfile, docker-compose.yml, Caddyfile, .dockerignore
   `sendMessageDraft` в Bot API).
 - **Rate limits драфтов подобраны эмпирически** (~1 обновление/сек +
   обработка 429 `retry_after`); официальной документации лимитов нет.
-- Docker-сборка в dev-среде не выполнялась (Docker недоступен) — миграции
-  против живой PostgreSQL проверяются при первом деплое.
-- Часть фактов по Gemini восстановлена по архивам документации (ai.google.dev
-  был недоступен в dev-сети); runtime-проверки провайдеров (capability probes)
-  не выполнялись без реальных ключей.
+- **PostgreSQL barrier/race integration-тесты** (два конкурентных соединения к
+  живой БД) формально не прогнаны — код-инварианты покрыты unit/контрактными
+  тестами; миграции 0001–0009 применены на проде (VPS, 2026-09-24).
+- **Frontend E2E** (Playwright против живого Mini App в Telegram WebView) не
+  поднимался; фронт проверен сборкой (`tsc` strict + `vite build`) и unit-логикой.
+- Деплой-заметки текущего VPS (фильтрация части IP api.telegram.org хостером,
+  pin в `extra_hosts`) — в `KNOWN_ISSUES.md`.

@@ -22,12 +22,9 @@ const IMPORTANCE_OPTIONS = Array.from({ length: 10 }, (_, i) => ({
   label: `${i + 1}`,
 }));
 
-const PAGE_SIZE = 50;
-
 export function MemoryPage() {
   const qc = useQueryClient();
-  const [limit, setLimit] = useState(PAGE_SIZE);
-  const memoriesQ = useMemories({ limit });
+  const memoriesQ = useMemories();
   const invalidate = () => void qc.invalidateQueries({ queryKey: qk.memories });
 
   const [editTarget, setEditTarget] = useState<MemoryItem | null>(null);
@@ -69,9 +66,10 @@ export function MemoryPage() {
     );
   }
 
-  const memories = memoriesQ.data?.memories ?? [];
-  const total = memoriesQ.data?.total ?? memories.length;
-  const hasMore = memories.length < total;
+  const pages = memoriesQ.data?.pages ?? [];
+  const memories = pages.flatMap((p) => p.memories);
+  const total = pages.length > 0 ? pages[pages.length - 1].total : memories.length;
+  const hasMore = memoriesQ.hasNextPage ?? false;
 
   const openEdit = (m: MemoryItem) => {
     setEditTarget(m);
@@ -133,8 +131,8 @@ export function MemoryPage() {
               <Button
                 size="small"
                 variant="secondary"
-                loading={memoriesQ.isFetching}
-                onClick={() => setLimit((v) => v + PAGE_SIZE)}
+                loading={memoriesQ.isFetchingNextPage}
+                onClick={() => void memoriesQ.fetchNextPage()}
               >
                 Загрузить ещё ({memories.length} из {total})
               </Button>

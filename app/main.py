@@ -128,7 +128,19 @@ async def main() -> None:
             settings.api_host,
             settings.api_port,
         )
-        await asyncio.gather(dp.start_polling(bot), uvicorn_server.serve())
+        # A34/A37: supervisor — первый завершённый (или SIGTERM) гасит остальное.
+        # Uvicorn сам ловит SIGINT/SIGTERM и выходит; polling тогда отменяем.
+        polling_task = asyncio.create_task(dp.start_polling(bot), name="bot-polling")
+        serve_task = asyncio.create_task(uvicorn_server.serve(), name="miniapp-api")
+        done, pending = await asyncio.wait(
+            {polling_task, serve_task}, return_when=asyncio.FIRST_COMPLETED
+        )
+        for pending_task in pending:
+            pending_task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        for done_task in done:
+            if exc := done_task.exception():
+                raise exc
     finally:
         # A30/A34: закрыть все транспорты ровно один раз (bot, LLM, search, DB).
         await llm_stream.aclose()

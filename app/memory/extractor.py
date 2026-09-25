@@ -202,12 +202,15 @@ class MemoryExtractor:
         chat_id: uuid.UUID,
         user_text: str,
         assistant_text: str,
+        min_chars: int | None = None,
     ) -> int:
         """Извлечь и сохранить факты из обмена. Возвращает число НОВЫХ записей.
 
         Фоновая задача: любые ошибки логируются, метод не падает (→ 0).
+        min_chars — per-call override (effective DB-настройка), иначе ctor/env.
         """
-        if len(user_text) + len(assistant_text) < self._min_chars:
+        effective_min_chars = min_chars if min_chars is not None else self._min_chars
+        if len(user_text) + len(assistant_text) < effective_min_chars:
             return 0
         prompt = MEMORY_EXTRACTION_PROMPT.replace("__USER__", user_text[:_MAX_SOURCE_CHARS])
         prompt = prompt.replace("__ASSISTANT__", assistant_text[:_MAX_SOURCE_CHARS])

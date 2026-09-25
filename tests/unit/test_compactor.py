@@ -442,7 +442,9 @@ async def test_unknown_existing_boundary_allows_safe_recompute() -> None:
 # --- A17: порционный compaction (ограничение prompt) ----------------------------
 
 
-async def test_long_segment_prompt_capped_middle_elided() -> None:
+async def test_long_segment_portioned_prefix_no_data_loss() -> None:
+    """A17: длинный сегмент compaction идёт порциями с НАЧАЛА; boundary — только
+    на реально включённый префикс; середина НЕ вырезается (потерь нет)."""
     # 38 сообщений сегмента по ~1010 символов → диалог ~38k > лимита 12k.
     messages = [_msg("user", f"{i:03}-" + "x" * 1000) for i in range(40)]
     summaries = FakeSummaryStore()
@@ -457,14 +459,18 @@ async def test_long_segment_prompt_capped_middle_elided() -> None:
 
     assert await compactor.maybe_compact(uuid.uuid4()) is True
     prompt = calls[0].messages[0]["parts"][0]["text"]
-    # голова и хвост сегмента сохранены, середина вырезана с маркером
+    # включён только префикс, умещающийся в бюджет (~12 сообщений по ~1010)
     assert "000-" in prompt
-    assert "037-" in prompt
-    assert "середина фрагмента пропущена" in prompt
-    assert "020-" not in prompt  # середина не попала в prompt
-    # boundary продвигается на весь сегмент, несмотря на усечение prompt
-    assert summaries.saved[0]["covered_until_message_id"] == messages[37].id
-    assert summaries.saved[0]["covered_messages_count"] == 38
+    assert "пропущена" not in prompt  # маркера элизии больше нет
+    covered_id = summaries.saved[0]["covered_until_message_id"]
+    covered_pos = next(i for i, m in enumerate(messages) if m.id == covered_id)
+    # boundary строго внутри сегмента, не на конце — остаток покроет следующий запуск
+    assert covered_pos < 37
+    # все включённые в prompt сообщения действительно покрыты boundary
+    last_in_prompt_pos = max(
+        (i for i, m in enumerate(messages) if f"{i:03}-" in prompt), default=-1
+    )
+    assert last_in_prompt_pos == covered_pos
 
 
 # --- sanitize_title ------------------------------------------------------------------

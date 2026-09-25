@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +40,41 @@ ALL_KEYS: tuple[str, ...] = (
     KEY_MEMORY_RETRIEVAL_LIMIT,
     KEY_MEMORY_EXTRACTION_MIN_CHARS,
 )
+
+# A27: runtime capability store — результаты probe, пишутся scripts/smoke_providers.py
+# с флагом --write-runtime. TTL 7 дней; устаревшее не применяется (stale ≠ fresh).
+CAPABILITY_PREFIX = "capability_probe:"
+CAPABILITY_TTL_SECONDS = 7 * 24 * 3600
+
+
+async def get_probe_capabilities(session: AsyncSession) -> dict[str, dict[str, Any]]:
+    """Свежие probe-результаты по моделям: {model_id: {"accepted_thinking": [...]}}.
+
+    Устаревшие (старше TTL) игнорируются. Секретов там нет.
+    """
+    rows = await SystemSettingRepository(session).get_all()
+    now = datetime.now(UTC)
+    result: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not row.key.startswith(CAPABILITY_PREFIX):
+            continue
+        value = row.value
+        if not isinstance(value, dict):
+            continue
+        at_raw = value.get("at")
+        try:
+            at = datetime.fromisoformat(str(at_raw)) if at_raw else None
+        except ValueError:
+            at = None
+        if at is None:
+            continue
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=UTC)
+        if (now - at).total_seconds() > CAPABILITY_TTL_SECONDS:
+            continue
+        result[row.key[len(CAPABILITY_PREFIX) :]] = value
+    return result
+
 
 _INVALID: Any = object()  # sentinel «невалидно» (None может быть валидным значением)
 

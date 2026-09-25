@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { api } from "./client";
 import type {
   AdminMemoriesResponse,
@@ -57,20 +57,35 @@ export function useModels() {
 }
 
 export interface ChatsParams {
-  limit?: number;
-  offset?: number;
   include_archived?: boolean;
   /** false — не выполнять запрос (ленивая вкладка). */
   enabled?: boolean;
 }
 
+export const CHATS_PAGE_SIZE = 20;
+
+/**
+ * Чаты с offset-пагинацией (страницы накапливаются через fetchNextPage).
+ * NB: backend ограничивает limit (cap 200), поэтому догрузка идёт offset'ом,
+ * а не ростом limit — иначе после cap кнопка «Загрузить ещё» становилась вечной.
+ */
 export function useChats(params: ChatsParams = {}) {
-  const { limit = 50, offset = 0, include_archived = false, enabled = true } = params;
-  const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-  if (include_archived) qs.set("include_archived", "true");
-  return useQuery({
-    queryKey: [...qk.chats, "list", { limit, offset, include_archived }] as const,
-    queryFn: () => api<ChatsResponse>(`/api/chats?${qs.toString()}`),
+  const { include_archived = false, enabled = true } = params;
+  return useInfiniteQuery({
+    queryKey: [...qk.chats, "list", { include_archived }] as const,
+    queryFn: ({ pageParam }) => {
+      const qs = new URLSearchParams({
+        limit: String(CHATS_PAGE_SIZE),
+        offset: String(pageParam),
+      });
+      if (include_archived) qs.set("include_archived", "true");
+      return api<ChatsResponse>(`/api/chats?${qs.toString()}`);
+    },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((sum, p) => sum + p.chats.length, 0);
+      return loaded < lastPage.total ? loaded : undefined;
+    },
     enabled,
   });
 }
@@ -88,17 +103,24 @@ export function useSettings() {
   return useQuery({ queryKey: qk.settings, queryFn: () => api<UserSettings>("/api/settings") });
 }
 
-export interface MemoriesParams {
-  limit?: number;
-  offset?: number;
-}
+export const MEMORIES_PAGE_SIZE = 50;
 
-export function useMemories(params: MemoriesParams = {}) {
-  const { limit = 50, offset = 0 } = params;
-  const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-  return useQuery({
-    queryKey: [...qk.memories, { limit, offset }] as const,
-    queryFn: () => api<MemoriesResponse>(`/api/memory?${qs.toString()}`),
+/** Память с offset-пагинацией (см. useChats). */
+export function useMemories() {
+  return useInfiniteQuery({
+    queryKey: [...qk.memories, "list"] as const,
+    queryFn: ({ pageParam }) => {
+      const qs = new URLSearchParams({
+        limit: String(MEMORIES_PAGE_SIZE),
+        offset: String(pageParam),
+      });
+      return api<MemoriesResponse>(`/api/memory?${qs.toString()}`);
+    },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((sum, p) => sum + p.memories.length, 0);
+      return loaded < lastPage.total ? loaded : undefined;
+    },
   });
 }
 
@@ -108,10 +130,30 @@ export function useAdminStats() {
   return useQuery({ queryKey: qk.adminStats, queryFn: () => api<AdminStats>("/api/admin/stats") });
 }
 
+export const ADMIN_USERS_PAGE_SIZE = 50;
+
+/**
+ * Пользователи (admin) с offset-пагинацией. Ответ не содержит total,
+ * поэтому «есть ещё» — эвристика: последняя страница пришла полной
+ * (ровно PAGE_SIZE). Если всего записей кратно PAGE_SIZE, будет один
+ * лишний запрос, вернувший пустую страницу, — кнопка после этого скроется.
+ */
 export function useAdminUsers(query: string) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: qk.adminUsers(query),
-    queryFn: () => api<AdminUsersResponse>(`/api/admin/users?query=${encodeURIComponent(query)}&limit=50`),
+    queryFn: ({ pageParam }) => {
+      const qs = new URLSearchParams({
+        query,
+        limit: String(ADMIN_USERS_PAGE_SIZE),
+        offset: String(pageParam),
+      });
+      return api<AdminUsersResponse>(`/api/admin/users?${qs.toString()}`);
+    },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      if (lastPage.users.length < ADMIN_USERS_PAGE_SIZE) return undefined;
+      return allPages.reduce((sum, p) => sum + p.users.length, 0);
+    },
   });
 }
 

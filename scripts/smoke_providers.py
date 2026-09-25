@@ -5,6 +5,7 @@
     python scripts/smoke_providers.py [--provider gemini|alibaba|all]
                                       [--alibaba-key KEY]
                                       [--gemini-project NAME]
+                                      [--write-runtime]
 
 Ключи (CLI печатает только маски, никогда сами ключи):
 - Gemini: первый enabled-проект из gemini_projects (decrypt через
@@ -15,6 +16,10 @@
 запуске без --strict: это отчёт, а не тест); 1 — при --strict есть хотя бы один
 check fail (skipped за fail НЕ считается); 130 — KeyboardInterrupt.
 Результаты: таблица в stdout + JSON в .agents/reports/probe_*.json.
+С --write-runtime дополнительно пишется runtime capability store (A27): по
+каждой модели с результатами — запись system_settings[capability_probe:<id>]
+(accepted_thinking/text_ok/at/endpoint), читается GET /api/models. Модели без
+результатов (skipped/not run) не трогаются — старые доказательства не затираются.
 
 Списки моделей — НЕ hardcoded, а enumeration из ModelRegistry (default_registry):
 новые модели попадают в прогон автоматически; internal_only помечаются в notes.
@@ -45,7 +50,7 @@ import httpx  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker  # noqa: E402
 
 from app.config import Settings, get_settings  # noqa: E402
-from app.db.repositories import GeminiProjectRepository  # noqa: E402
+from app.db.repositories import GeminiProjectRepository, SystemSettingRepository  # noqa: E402
 from app.db.session import create_engine_from_url, make_session_factory  # noqa: E402
 from app.llm.base import LLMProvider, LLMRequest, LLMTool, MessageDict  # noqa: E402
 from app.llm.capabilities import THINKING_OFF, ModelDefinition  # noqa: E402
@@ -57,6 +62,7 @@ from app.llm.providers.gemini import GeminiProvider  # noqa: E402
 from app.llm.registry import ModelRegistry, default_registry  # noqa: E402
 from app.security.crypto import CryptoBox, mask_secret  # noqa: E402
 from app.services.credentials import get_provider_api_key  # noqa: E402
+from app.services.settings import CAPABILITY_PREFIX  # noqa: E402
 
 logger = logging.getLogger("smoke_providers")
 
@@ -601,6 +607,70 @@ def _write_report(report: dict[str, Any]) -> Path:
     return path
 
 
+# --- Runtime capability store (A27, --write-runtime) -------------------------
+
+_RUNTIME_ENDPOINTS = {"gemini": "gemini-proxy", "alibaba": "alibaba"}
+
+
+def _runtime_entries(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Записи capability_probe для моделей с результатами probe.
+
+    accepted_thinking — уровни из checks "thinking:<level>" со status ok
+    ("off" включается наравне с остальными, если был проверен и ok).
+    Модели без результатов (skipped/not run, секция провайдера не ok) сюда не
+    попадают — их старые записи в system_settings НЕ затираются.
+    """
+    stamped_at = datetime.now(UTC).isoformat(timespec="seconds")
+    entries: dict[str, dict[str, Any]] = {}
+    for provider_id, endpoint in _RUNTIME_ENDPOINTS.items():
+        section = report.get(provider_id)
+        if not isinstance(section, dict) or section.get("status") != "ok":
+            continue
+        for model_id, model_report in (section.get("models") or {}).items():
+            checks = model_report.get("checks") or {}
+            accepted = [
+                name.removeprefix("thinking:")
+                for name, check in checks.items()
+                if name.startswith("thinking:") and check.get("status") == "ok"
+            ]
+            entries[model_id] = {
+                "accepted_thinking": accepted,
+                "text_ok": (checks.get("text_stream") or {}).get("status") == "ok",
+                "at": stamped_at,
+                "endpoint": endpoint,
+            }
+    return entries
+
+
+async def _write_runtime(report: dict[str, Any]) -> int:
+    """Upsert записей capability_probe:<model_id> в system_settings.
+
+    Возвращает число записанных моделей; 0 — нечего писать или БД недоступна
+    (probe не должен падать из-за этого, только warning).
+    """
+    entries = _runtime_entries(report)
+    if not entries:
+        return 0
+    engine = create_engine_from_url(get_settings().database_url)
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            repo = SystemSettingRepository(session)
+            for model_id, value in entries.items():
+                await repo.set_value(f"{CAPABILITY_PREFIX}{model_id}", value)
+            await session.commit()
+    except Exception as exc:
+        logger.warning(
+            "write-runtime: запись в system_settings не удалась (%s: %s)",
+            type(exc).__name__,
+            str(exc)[:200],
+        )
+        return 0
+    finally:
+        await engine.dispose()
+    return len(entries)
+
+
 # --- CLI -------------------------------------------------------------------
 
 
@@ -613,7 +683,7 @@ def _reconfigure_stdio() -> None:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """CLI: --provider, --alibaba-key, --gemini-project, --strict."""
+    """CLI: --provider, --alibaba-key, --gemini-project, --strict, --write-runtime."""
     parser = argparse.ArgumentParser(
         description="Capability probe: реальные (дёшево) запросы к Gemini/Alibaba"
     )
@@ -637,6 +707,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--strict",
         action="store_true",
         help="exit code 1, если хоть один check fail (skipped за fail не считается)",
+    )
+    parser.add_argument(
+        "--write-runtime",
+        action="store_true",
+        help="записать результаты в system_settings (capability_probe:<model_id>) "
+        "для runtime-фильтрации GET /api/models (A27)",
     )
     return parser.parse_args(argv)
 
@@ -690,6 +766,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     print("ВНИМАНИЕ: будут выполнены РЕАЛЬНЫЕ API-запросы к провайдерам (стоимость низкая).")
     report = asyncio.run(_run(args))
+    if args.write_runtime:
+        # Запись ПОСЛЕ формирования report, перед печатью итогов (A27).
+        written = asyncio.run(_write_runtime(report))
+        if written:
+            print(f"runtime: в system_settings записано capability_probe для {written} моделей")
+        else:
+            print("runtime: ничего не записано (нет результатов probe или БД недоступна)")
     for provider_id in ("gemini", "alibaba"):
         section = report.get(provider_id)
         if not isinstance(section, dict) or section.get("status") != "ok":

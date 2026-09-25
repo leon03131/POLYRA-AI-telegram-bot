@@ -24,6 +24,7 @@ from app.llm.errors import (
     NetworkError,
     ProviderError,
     RateLimitError,
+    SafetyError,
     ServerError,
     TimeoutError_,
     classify_http_status,
@@ -261,6 +262,9 @@ def _events_from_choice(
     for tool_call in delta.get("tool_calls") or []:
         _accumulate_tool_call(pending, tool_call)
     finish_reason = choice.get("finish_reason")
+    if finish_reason == "content_filter":
+        # A23: модерация контента — отдельная категория, не сетевой сбой.
+        raise SafetyError("alibaba finish_reason=content_filter")
     if finish_reason == "tool_calls":
         events.extend(_flush_tool_calls(pending))
     elif finish_reason in ("stop", "length"):

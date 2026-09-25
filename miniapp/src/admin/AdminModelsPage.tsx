@@ -3,7 +3,7 @@ import { api, errorMessage } from "../api/client";
 import { qk, useAdminModels } from "../api/hooks";
 import type { AdminModel } from "../api/types";
 import { Chip, EmptyState, Section, Spinner, Toggle } from "../components";
-import { formatNumber, thinkingLabel } from "../utils";
+import { formatDateTime, formatNumber, thinkingLabel } from "../utils";
 
 function ModelRow({ model: m }: { model: AdminModel }) {
   const qc = useQueryClient();
@@ -31,6 +31,12 @@ function ModelRow({ model: m }: { model: AdminModel }) {
             <Chip key={t}>{thinkingLabel(t)}</Chip>
           ))}
         </div>
+        {m.probe_at && (
+          <div className="hint-text" style={{ marginTop: 4 }}>
+            проверено: {formatDateTime(m.probe_at)}
+            {m.probe_fresh === false ? " (устарело)" : ""}
+          </div>
+        )}
       </td>
       <td>
         {formatNumber(m.max_context)} / {formatNumber(m.max_output)}

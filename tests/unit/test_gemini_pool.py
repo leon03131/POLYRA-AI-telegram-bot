@@ -416,8 +416,9 @@ async def test_401_disables_project_and_rotates() -> None:
     assert provider.calls[1].metadata["api_key"] == "plain:enc:p2"
 
 
-async def test_403_permission_denied_disables_project() -> None:
-    """403 PERMISSION_DENIED (мёртвый Google-проект) → disable, а не cooldown-цикл."""
+async def test_403_permission_denied_long_cooldown_not_disable() -> None:
+    """403 PERMISSION_DENIED (мёртвый Google-проект) → длинный cooldown (24ч),
+    НЕ перманентный disable (ТЗ §9: 403 → cooldown + следующий проект)."""
     p1, p2 = _project("p1"), _project("p2")
     pool, store, _ = _make_pool([p1, p2])
     provider = FakeProvider()
@@ -427,10 +428,10 @@ async def test_403_permission_denied_disables_project() -> None:
     events = await _collect(pool, provider)
 
     assert events == [TextDelta("ok"), Done("stop")]
-    pid, code, _ = store.calls.mark_unhealthy[0]
-    assert (pid, code) == (p1.id, "PERMISSION_DENIED")
-    assert store.projects[0].enabled is False
-    assert store.calls.set_cooldown == []
+    assert store.calls.mark_unhealthy == []  # не выключаем навсегда
+    assert len(store.calls.set_cooldown) == 1
+    until = store.calls.set_cooldown[0][1]
+    assert until is not None and (until - NOW).total_seconds() >= 23 * 3600
 
 
 async def test_403_generic_gets_cooldown_not_disable() -> None:

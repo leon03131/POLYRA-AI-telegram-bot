@@ -84,10 +84,12 @@ def sanitize_partial_markdown(text: str) -> str:
 
 
 def _tail(text: str, limit: int) -> str:
-    """Последние ``limit`` символов текста с префиксом «…\\n», если обрезано."""
+    """Хвост текста с префиксом «…\\n»; ИТОГОВАЯ длина не превышает ``limit``.
+
+    A21: раньше префикс добавлялся сверх лимита (32770 > 32768 у rich)."""
     if len(text) <= limit:
         return text
-    return TAIL_PREFIX + text[-limit:]
+    return TAIL_PREFIX + text[-(limit - len(TAIL_PREFIX)) :]
 
 
 def _split_text(text: str, limit: int) -> list[str]:

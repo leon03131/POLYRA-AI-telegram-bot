@@ -428,7 +428,7 @@ export function AdminUsersPage() {
     },
   });
 
-  const users = usersQ.data?.users ?? [];
+  const users = usersQ.data?.pages.flatMap((p) => p.users) ?? [];
 
   const openGrantById = () => {
     const tgId = Number(grantById.trim());
@@ -494,6 +494,19 @@ export function AdminUsersPage() {
           />
         ))}
       </div>
+
+      {usersQ.hasNextPage && (
+        <div style={{ padding: 12 }}>
+          <Button
+            size="small"
+            variant="secondary"
+            loading={usersQ.isFetchingNextPage}
+            onClick={() => void usersQ.fetchNextPage()}
+          >
+            Загрузить ещё (показано {users.length})
+          </Button>
+        </div>
+      )}
 
       {grantTarget && (
         <GrantModal

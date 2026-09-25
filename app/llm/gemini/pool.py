@@ -221,12 +221,12 @@ class GeminiProjectPool:
             case ErrorCategory.AUTH:
                 await self._store.mark_unhealthy(project_id, error_code=code, error_message=message)
             case ErrorCategory.FORBIDDEN:
-                # PERMISSION_DENIED «project denied access» = мёртвый проект Google —
-                # выключаем сразу, иначе будет гореть cooldown-циклами в каждой ротации.
                 if code == "PERMISSION_DENIED":
-                    await self._store.mark_unhealthy(
-                        project_id, error_code=code, error_message=message
-                    )
+                    # ТЗ §9: 403 → cooldown (не перманентный disable). Мёртвые
+                    # Google-проекты получают длинный cooldown (24ч), чтобы не
+                    # гореть в каждой ротации, но остаются восстановимыми.
+                    await self._store.set_cooldown(project_id, now + timedelta(hours=24))
+                    await self._store.mark_error(project_id, error_code=code, error_message=message)
                     return
                 await self._store.set_cooldown(
                     project_id, now + timedelta(seconds=self._cooldown_403)

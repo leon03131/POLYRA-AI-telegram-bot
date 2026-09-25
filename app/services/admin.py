@@ -101,6 +101,14 @@ async def grant_access(
     трогаем; explicit None — записать NULL (снять лимит / permanent).
     Новый грант: непереданные поля получают дефолты колонок (лимиты NULL).
     """
+    # A26: bounds для числовых лимитов — отрицательные/нулевые отклоняются.
+    for field_name, value in (
+        ("requests_per_day", requests_per_day),
+        ("token_limit", token_limit),
+        ("max_concurrent_generations", max_concurrent_generations),
+    ):
+        if value is not UNSET and value is not None and value <= 0:
+            raise ValueError(f"{field_name} must be positive")
     user = await _get_or_create_user(session, telegram_user_id)
     repo = AccessRepository(session)
     provided: dict[str, Any] = {

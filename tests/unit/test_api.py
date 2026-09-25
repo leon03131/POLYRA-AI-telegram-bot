@@ -19,7 +19,7 @@ import hashlib
 import hmac
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlencode
@@ -29,7 +29,8 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.api import create_app
-from app.api.dependencies import get_current_user
+from app.api.dependencies import get_current_user, get_db_session
+from app.api.routes import me as me_routes
 from app.config import Settings
 from app.db.models import User
 from app.llm.registry import default_registry
@@ -177,6 +178,22 @@ def _override_user(app: FastAPI, *, is_owner: bool, user: User | None = None) ->
     return user
 
 
+def _override_probe_capabilities(
+    monkeypatch: pytest.MonkeyPatch, app: FastAPI, probe: dict[str, dict[str, Any]]
+) -> None:
+    """Подменить DB-сессию (фейк) и probe-capabilities для /api/models (A27)."""
+
+    async def _fake_session() -> Any:
+        yield None
+
+    app.dependency_overrides[get_db_session] = _fake_session
+
+    async def _fake_probe(session: Any) -> dict[str, dict[str, Any]]:
+        return probe
+
+    monkeypatch.setattr(me_routes, "get_probe_capabilities", _fake_probe)
+
+
 async def test_me_serialization_with_override() -> None:
     app = _make_app()
     _override_user(app, is_owner=False)
@@ -192,9 +209,12 @@ async def test_me_serialization_with_override() -> None:
     assert body["permissions"]["token_limit"] == 50000
 
 
-async def test_models_excludes_internal_and_probe_modes() -> None:
+async def test_models_excludes_internal_and_probe_modes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     app = _make_app()
     _override_user(app, is_owner=True)
+    _override_probe_capabilities(monkeypatch, app, {})  # probe-записей нет
     async with _client(app) as client:
         response = await client.get("/api/models")
     assert response.status_code == 200
@@ -215,7 +235,136 @@ async def test_models_excludes_internal_and_probe_modes() -> None:
             "supports_images",
             "thinking_modes",
             "default_thinking",
+            "probe_at",
         }
+        assert model["probe_at"] is None  # без probe-записей — None
+
+
+# --- A27: probe → runtime wiring (capability_probe:<model_id> в /api/models) ----
+
+_PROBE_AT = datetime.now(UTC).isoformat(timespec="seconds")
+
+
+async def test_models_probe_record_filters_thinking_modes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Свежая probe-запись с accepted_thinking фильтрует режимы по факту acceptance."""
+    app = _make_app()
+    _override_user(app, is_owner=True)
+    _override_probe_capabilities(
+        monkeypatch,
+        app,
+        {
+            "kimi-k3": {
+                "accepted_thinking": ["off", "high"],
+                "text_ok": True,
+                "at": _PROBE_AT,
+                "endpoint": "alibaba",
+            }
+        },
+    )
+    async with _client(app) as client:
+        response = await client.get("/api/models")
+    assert response.status_code == 200
+    models = {model["model_id"]: model for model in response.json()["models"]}
+    kimi = models["kimi-k3"]
+    # порядок — как в registry thinking_modes, фильтр по accepted
+    assert kimi["thinking_modes"] == ["off", "high"]
+    assert kimi["probe_at"] == _PROBE_AT
+    # модель без probe-записи — registry как есть
+    qwen = models["qwen3.8-flash"]
+    assert qwen["thinking_modes"] == ["off", "low", "medium", "max"]
+    assert qwen["probe_at"] is None
+
+
+async def test_models_probe_empty_accepted_falls_back_to_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """accepted_thinking=[] — фильтрация НЕ применяется (registry как есть)."""
+    app = _make_app()
+    _override_user(app, is_owner=True)
+    _override_probe_capabilities(
+        monkeypatch,
+        app,
+        {
+            "kimi-k3": {
+                "accepted_thinking": [],
+                "text_ok": False,
+                "at": _PROBE_AT,
+                "endpoint": "alibaba",
+            }
+        },
+    )
+    async with _client(app) as client:
+        response = await client.get("/api/models")
+    assert response.status_code == 200
+    models = {model["model_id"]: model for model in response.json()["models"]}
+    kimi = models["kimi-k3"]
+    assert kimi["thinking_modes"] == ["off", "low", "high", "max"]
+    assert kimi["probe_at"] == _PROBE_AT  # свежая запись есть — время показываем
+
+
+async def test_models_stale_probe_record_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Устаревшая запись отбрасывается get_probe_capabilities → registry как есть."""
+    app = _make_app()
+    _override_user(app, is_owner=True)
+    # get_probe_capabilities уже отфильтровал stale-записи (TTL в сервисе) — роут
+    # получает пустой dict; проверяем контракт роута на этом входе.
+    _override_probe_capabilities(monkeypatch, app, {})
+    async with _client(app) as client:
+        response = await client.get("/api/models")
+    assert response.status_code == 200
+    models = {model["model_id"]: model for model in response.json()["models"]}
+    assert models["kimi-k3"]["thinking_modes"] == ["off", "low", "high", "max"]
+    assert models["kimi-k3"]["probe_at"] is None
+
+
+class _FakeProbeRowRepository:
+    """Подмена SystemSettingRepository для get_probe_capabilities: get_all по строкам."""
+
+    def __init__(self, session: Any, rows: list[Any]) -> None:
+        self._rows = rows
+
+    async def get_all(self) -> list[Any]:
+        return self._rows
+
+
+def _probe_row(key: str, value: Any) -> Any:
+    return SimpleNamespace(key=key, value=value)
+
+
+async def test_get_probe_capabilities_filters_stale_and_malformed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TTL-фильтр: свежие записи возвращаются по model_id, stale/битые — нет."""
+    fresh_at = datetime.now(UTC).isoformat(timespec="seconds")
+    stale_at = (
+        datetime.now(UTC) - timedelta(seconds=settings_service.CAPABILITY_TTL_SECONDS + 60)
+    ).isoformat(timespec="seconds")
+    rows = [
+        _probe_row(
+            "capability_probe:kimi-k3",
+            {"accepted_thinking": ["high"], "text_ok": True, "at": fresh_at},
+        ),
+        # stale (старше TTL) — отбрасывается
+        _probe_row(
+            "capability_probe:qwen3.8-flash",
+            {"accepted_thinking": ["off"], "text_ok": True, "at": stale_at},
+        ),
+        _probe_row("capability_probe:broken", "not-a-dict"),  # value не dict
+        _probe_row("capability_probe:no-at", {"accepted_thinking": ["low"]}),  # нет at
+        _probe_row("default_model", {"at": fresh_at}),  # чужой ключ
+    ]
+    monkeypatch.setattr(
+        settings_service,
+        "SystemSettingRepository",
+        lambda session: _FakeProbeRowRepository(session, rows),
+    )
+    result = await settings_service.get_probe_capabilities(None)
+    assert set(result) == {"kimi-k3"}
+    assert result["kimi-k3"]["accepted_thinking"] == ["high"]
 
 
 async def test_admin_forbidden_for_non_owner() -> None:

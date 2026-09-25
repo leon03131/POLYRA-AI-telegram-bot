@@ -39,7 +39,7 @@ export function HomePage() {
     );
   }
 
-  const chats = chatsQ.data?.chats ?? [];
+  const chats = chatsQ.data?.pages.flatMap((p) => p.chats) ?? [];
   const models = modelsQ.data?.models ?? [];
   const settings = settingsQ.data ?? null;
   const chat = chats.find((c) => c.is_current) ?? null;

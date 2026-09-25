@@ -113,3 +113,39 @@
 - `miniapp/` (12 файлов + 2 новые страницы)
 - `tests/unit/` + `tests/integration/` (новые)
 - `Dockerfile`, `docker-compose.yml`, `docs/API.md`, `pyproject.toml`
+
+---
+
+## Приложение: независимый ре-аудит (FINAL_IMPLEMENTATION_REVIEW.md, 2026-09-25) и доработки
+
+Независимый аудит (8 субагентов) нашёл, что часть пунктов была «fixed по коду, но не по
+проду». Исправлено в ответ на аудит (commit-поток после `478a172`):
+
+| Дефект аудита | Исправление | Проверка |
+|---|---|---|
+| Stop-partial как HTML (A20) | `parse_mode=None` + полная разбивка partial | test_fix_v2_usage_ledger + unit |
+| Orphan tool_calls при >4 вызовах (A39) | в историю попадают только ИСПОЛНЕННЫЕ вызовы | test_generation tool-loop |
+| `_tail` prefix сверх лимита rich (A21) | лимит включает префикс | test_draft_streamer |
+| Дубль current-сообщения при summary (A15) | exclude_message_id в _build_context | test_context |
+| Rehydration только при summary (A18) | всегда для image-capable моделей | код-ревью |
+| DB-настройка memory_min_chars выбрасывалась (A13) | min_chars проброшен per-call; ContextBuilder строится на effective (DB) настройках запроса | test_api |
+| Элизия середины истории (A17) | порционный PREFIX-отбор; boundary только по включённым | test_compactor (переписан закреплявший баг тест) |
+| PERMISSION_DENIED → disable вопреки ТЗ §9 (A10) | длинный cooldown 24ч вместо disable | test_gemini_pool |
+| gemini_project_id/attempts не писались в run (A07) | finish(attempts, gemini_project_id) во всех 3 финалах | unit |
+| content_filter → NetworkError (A23) | SafetyError | unit |
+| SOURCES мог быть съеден обрезкой (A32) | SOURCES первой частью результата | test_tools |
+| Отрицательные лимиты принимались (A26) | ValueError при <= 0 | test_api |
+| aclose устаревшего Alibaba-клиента рвал активный стрим (A30) | graveyard до shutdown | unit |
+| gather без SIGTERM-супервизора (A34/A37) | asyncio.wait FIRST_COMPLETED + cancel pending | live restart на VPS |
+| probe не влиял на runtime (A27) | --write-runtime → system_settings; /api/models фильтрует thinking_modes по свежему probe + probe_at | test_api |
+| Статистика без TTFT/errors (A35) | avg_ttft_s, error_rate_today, recent_failed_runs; UI Dashboard | unit + npm build |
+| Пагинация users (A28) | useInfiniteQuery offset-пагинация | npm build |
+| Legacy image-drop путь (A18) | build_messages: image без bytes → «[изображение]» | test_generation |
+| Unknown-model fallback тест закреплял баг (A36) | resolve без fallback; тест ждёт UnknownModelError | test_generation |
+| CI отсутствовал (A36) | .github/workflows/ci.yml (python+frontend) | YAML valid; первый прогон — на push |
+| README без Pro / KNOWN_ISSUES протух (A38) | README + KNOWN_ISSUES обновлены | ревью |
+
+После доработок: **492 passed, ruff ✓, mypy strict ✓ (155 файлов)**. Остатки (честно):
+PG barrier-тесты не прогнаны (нет локальной БД), frontend E2E не поднимался,
+Kimi DTL — optional (не реализован по ТЗ §25), probe→runtime — реализован write+read,
+live-запись в БД не гонял на проде (по бюджету ключей).

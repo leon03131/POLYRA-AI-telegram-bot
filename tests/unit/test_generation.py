@@ -27,7 +27,7 @@ from app.llm.errors import (
 )
 from app.llm.events import Done, LLMEvent, ReasoningDelta, TextDelta, ToolCall, ToolResult, Usage
 from app.llm.gemini.pool import PoolExhaustedError
-from app.llm.registry import default_registry
+from app.llm.registry import UnknownModelError, default_registry
 from app.llm.tools.registry import ToolDefinition, ToolRegistry
 from app.llm.tools.runner import ToolExecution, ToolRunner
 from app.llm.tools.schemas import make_llm_tools
@@ -184,14 +184,15 @@ def test_resolve_global_default_and_model_default_thinking() -> None:
     assert thinking == "medium"  # default_thinking модели
 
 
-def test_resolve_unknown_model_falls_back_to_default() -> None:
-    model_id, _ = resolve_model_and_thinking(
-        chat=_chat("no-such-model"),
-        user_settings=_user_settings(),
-        settings=_SETTINGS,
-        registry=default_registry(),
-    )
-    assert model_id == "gemini-3.8-flash"
+def test_resolve_unknown_model_no_silent_fallback() -> None:
+    """A25: неизвестная модель НЕ подменяется default (явный отказ — уровнем выше)."""
+    with pytest.raises(UnknownModelError):
+        resolve_model_and_thinking(
+            chat=_chat("no-such-model"),
+            user_settings=_user_settings(),
+            settings=_SETTINGS,
+            registry=default_registry(),
+        )
 
 
 def test_resolve_thinking_outside_modes_becomes_none() -> None:
@@ -229,7 +230,8 @@ def test_build_messages_text_history_plus_current_as_is() -> None:
     ]
 
 
-def test_build_messages_skips_image_parts_in_history() -> None:
+def test_build_messages_image_without_bytes_becomes_placeholder() -> None:
+    """A18: image part без bytes НЕ выбрасывается — текстовый плейсхолдер."""
     history = [
         _history_message(
             "user",
@@ -240,13 +242,18 @@ def test_build_messages_skips_image_parts_in_history() -> None:
         )
     ]
     messages = build_messages(history=history, current_parts=[{"type": "text", "text": "ok"}])
-    assert messages[0] == {"role": "user", "parts": [{"type": "text", "text": "подпись"}]}
+    assert messages[0] == {
+        "role": "user",
+        "parts": [{"type": "text", "text": "[изображение]"}, {"type": "text", "text": "подпись"}],
+    }
 
 
-def test_build_messages_drops_image_only_history_message() -> None:
+def test_build_messages_image_only_message_survives_as_placeholder() -> None:
+    """A18: сообщение только из фото не исчезает из истории."""
     history = [_history_message("user", [{"type": "image", "text": None}])]
     messages = build_messages(history=history, current_parts=[{"type": "text", "text": "ok"}])
-    assert messages == [{"role": "user", "parts": [{"type": "text", "text": "ok"}]}]
+    assert messages[0] == {"role": "user", "parts": [{"type": "text", "text": "[изображение]"}]}
+    assert messages[1]["parts"] == [{"type": "text", "text": "ok"}]
 
 
 # --- _consume -----------------------------------------------------------------

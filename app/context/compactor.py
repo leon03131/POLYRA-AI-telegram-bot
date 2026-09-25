@@ -69,7 +69,6 @@ _COMPACTION_LOCKS: dict[str, asyncio.Lock] = {}
 # Ограничение рендера диалога в prompt compaction: длинный сегмент режется
 # по СЕРЕДИНЕ (голова и хвост сохраняются), с маркером пропуска.
 _MAX_DIALOG_CHARS = 12_000
-_ELISION_MARKER = "… [середина фрагмента пропущена: {count} сообщ.] …"
 
 
 def _chat_lock(chat_id: uuid.UUID) -> asyncio.Lock:
@@ -130,34 +129,30 @@ def _message_text(message: Message) -> str:
     return " ".join(part.text for part in message.parts if part.type == "text" and part.text)
 
 
-def _cap_dialog(dialog_lines: list[str]) -> list[str]:
-    """Ограничить рендер диалога ~_MAX_DIALOG_CHARS, вырезая СЕРЕДИНУ с маркером.
+def _cap_segment_prefix(segment: list[Message], min_segment: int) -> list[Message]:
+    """A17: порционный compaction — берём ПРЕФИКС сегмента, умещающийся в бюджет.
 
-    Голова и хвост сегмента сохраняются (каждому — до половины лимита);
-    пропущенная середина помечается маркером с числом вырезанных сообщений.
-    Хвост (самые свежие сообщения сегмента) не теряется никогда, пока
-    отдельные строки короче половины лимита.
+    Boundary продвигается только на реально включённые сообщения; остаток
+    сегмента дождётся следующего запуска. Середина НЕ вырезается (потерь нет).
+    Если даже min_segment сообщений не влезают — они принудительно включаются
+    с усечением текста каждого сообщения (лучше грубая сводка, чем никакой).
     """
-    if sum(len(line) + 1 for line in dialog_lines) <= _MAX_DIALOG_CHARS:
-        return dialog_lines
-    half = _MAX_DIALOG_CHARS // 2
-    head: list[str] = []
+    total = sum(len(_message_text(m)) + 1 for m in segment)
+    if total <= _MAX_DIALOG_CHARS:
+        return segment
+    included: list[Message] = []
     used = 0
-    for line in dialog_lines:
-        if used + len(line) + 1 > half:
+    for message in segment:
+        line_len = len(_message_text(message)) + 1
+        if included and used + line_len > _MAX_DIALOG_CHARS:
             break
-        head.append(line)
-        used += len(line) + 1
-    tail: list[str] = []
-    used = 0
-    for line in reversed(dialog_lines):
-        if used + len(line) + 1 > half:
-            break
-        tail.append(line)
-        used += len(line) + 1
-    tail.reverse()
-    skipped = len(dialog_lines) - len(head) - len(tail)
-    return [*head, _ELISION_MARKER.format(count=max(1, skipped)), *tail]
+        included.append(message)
+        used += line_len
+    if len(included) >= min_segment:
+        return included
+    # Крайний случай: гигантские сообщения — берём min_segment с грубым усечением
+    # текстов (boundary всё равно двигается только по включённым).
+    return segment[: max(min_segment, 1)]
 
 
 async def collect_text(llm_stream: LLMStreamFn, request: LLMRequest) -> str:
@@ -295,6 +290,10 @@ class ContextCompactor:
             if len(segment) < self._min_segment:
                 return False
 
+            # A17: порционный compaction — префикс сегмента, целиком умещающийся
+            # в бюджет. Boundary продвигается ТОЛЬКО на включённый префикс;
+            # остаток сегмента дождётся следующего запуска (потерь нет).
+            segment = _cap_segment_prefix(segment, self._min_segment)
             prompt = self._build_prompt(state.summary if state else None, segment)
             summary = await self._ask_json(prompt)
             if summary is None:
@@ -370,7 +369,8 @@ class ContextCompactor:
             text = _message_text(message)
             if text:
                 dialog_lines.append(f"{message.role}: {text}")
-        lines.extend(_cap_dialog(dialog_lines))
+        # Сегмент уже порционно ограничен префиксом (A17) — без вырезания середины.
+        lines.extend(dialog_lines)
         return "\n".join(lines)
 
     async def _ask_json(self, prompt: str) -> dict[str, Any] | None:

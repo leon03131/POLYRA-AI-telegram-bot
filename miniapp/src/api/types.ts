@@ -39,6 +39,8 @@ export interface ModelInfo {
   supports_images: boolean;
   thinking_modes: string[];
   default_thinking: string | null;
+  /** Время последнего capability probe (A27); null/отсутствует на старом backend. */
+  probe_at?: string | null;
 }
 
 export interface ModelsResponse {
@@ -212,6 +214,18 @@ export interface SystemSettings {
   memory_retrieval_limit: number;
 }
 
+/** Последний failed/aborted run (AdminStats.recent_failed_runs, V2 extra 2026-09-25). */
+export interface RecentFailedRun {
+  id: string;
+  chat_id: string | null;
+  model_id: string | null;
+  status: string;
+  error_category: string | null;
+  error_code: string | null;
+  started_at: string;
+  duration_s: number | null;
+}
+
 export interface AdminStats {
   users_total: number;
   users_active_7d: number;
@@ -225,6 +239,11 @@ export interface AdminStats {
   errors_today?: number;
   rate_limit_429_today?: number;
   gemini_usage_today?: { project_name: string; requests: number; tokens_in: number }[];
+  /** Средний TTFT за сегодня (с); null, если completed-запусков с first_token_at не было. */
+  avg_ttft_s?: number | null;
+  /** Доля (failed+aborted) среди генераций сегодня, 0..1. */
+  error_rate_today?: number;
+  recent_failed_runs?: RecentFailedRun[];
 }
 
 export interface AuditEntry {
@@ -255,6 +274,9 @@ export interface AdminModel {
   default_thinking: string | null;
   max_context: number;
   max_output: number;
+  // Capability probe (A27): поля опциональны — старый backend их не отдаёт.
+  probe_at?: string | null;
+  probe_fresh?: boolean;
 }
 
 export interface AdminModelsResponse {

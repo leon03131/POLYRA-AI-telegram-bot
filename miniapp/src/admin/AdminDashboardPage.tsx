@@ -1,7 +1,12 @@
 import { useAdminStats } from "../api/hooks";
 import { errorMessage } from "../api/client";
 import { Chip, EmptyState, Section, ListRow, Spinner } from "../components";
-import { formatNumber } from "../utils";
+import { formatDateTime, formatNumber, healthTone } from "../utils";
+
+/** error_rate_today: доля (0..1) → %. */
+function formatRate(v: number): string {
+  return `${(v * 100).toFixed(1)}%`;
+}
 
 export function AdminDashboardPage() {
   const statsQ = useAdminStats();
@@ -70,6 +75,20 @@ export function AdminDashboardPage() {
             <div className="stat-label">429 сегодня</div>
           </div>
         )}
+        {s.avg_ttft_s !== undefined && (
+          <div className="stat-card">
+            <div className="stat-value">
+              {s.avg_ttft_s === null ? "—" : s.avg_ttft_s.toFixed(1)}
+            </div>
+            <div className="stat-label">Средний TTFT, с</div>
+          </div>
+        )}
+        {s.error_rate_today !== undefined && (
+          <div className="stat-card">
+            <div className="stat-value">{formatRate(s.error_rate_today)}</div>
+            <div className="stat-label">Error rate сегодня</div>
+          </div>
+        )}
       </div>
 
       {modelEntries.length > 0 && (
@@ -89,6 +108,38 @@ export function AdminDashboardPage() {
               right={formatNumber(count)}
             />
           ))}
+        </Section>
+      )}
+
+      {s.recent_failed_runs && s.recent_failed_runs.length > 0 && (
+        <Section title="Последние неудачные генерации">
+          <div className="table-wrap" style={{ borderRadius: 0 }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Модель</th>
+                  <th>Статус</th>
+                  <th>Категория ошибки</th>
+                  <th>Время</th>
+                </tr>
+              </thead>
+              <tbody>
+                {s.recent_failed_runs.map((r) => (
+                  <tr key={r.id}>
+                    <td className="mono">{r.model_id ?? "—"}</td>
+                    <td>
+                      <Chip tone={healthTone(r.status)}>{r.status}</Chip>
+                    </td>
+                    <td>
+                      {r.error_category ?? "—"}
+                      {r.error_code ? ` (${r.error_code})` : ""}
+                    </td>
+                    <td>{formatDateTime(r.started_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </Section>
       )}
     </div>

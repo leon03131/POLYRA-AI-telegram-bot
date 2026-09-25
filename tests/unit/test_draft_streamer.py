@@ -257,7 +257,8 @@ async def test_flush_tail_mode_for_long_text() -> None:
     _, kwargs = bot.calls[0]
     markdown = kwargs["rich_message"].markdown
     assert markdown.startswith("…\n")
-    assert len(markdown) == 32700 + 2  # префикс + последние 32700 символов
+    # A21: итоговая длина С учётом префикса не превышает лимит rich draft.
+    assert len(markdown) == 32700  # префикс входит в лимит
     assert markdown.endswith("y" * 100)
 
 

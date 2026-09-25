@@ -20,6 +20,11 @@ class SystemSettingRepository:
         setting = await self._session.get(SystemSetting, key)
         return setting.value if setting is not None else None
 
+    async def get_all(self) -> list[SystemSetting]:
+        """Все записи system_settings (для probe-capabilities и admin)."""
+        result = await self._session.execute(select(SystemSetting))
+        return list(result.scalars().all())
+
     async def get_many(self, keys: Iterable[str]) -> dict[str, Any]:
         """Значения по списку ключей: {key: value} только для существующих ключей."""
         stmt = select(SystemSetting).where(SystemSetting.key.in_(list(keys)))
