@@ -120,6 +120,7 @@ ALIBABA_MODELS: tuple[ModelDefinition, ...] = (
         model_id="deepseek-v4.1-flash",
         display_name="DeepSeek V4.1 Flash",
         input_modalities=frozenset({"text", "image"}),
+        max_output=393_216,  # 384K — владелец подтвердил (как у deepseek-v4-pro)
         thinking_modes=(THINKING_OFF, THINKING_LOW, THINKING_HIGH, THINKING_MAX),
         default_thinking=None,
         # probe 2026-09-18: OFF (enable_thinking=false) принят endpoint'ом.
@@ -157,7 +158,8 @@ ALIBABA_MODELS: tuple[ModelDefinition, ...] = (
         thinking_modes=(THINKING_OFF, THINKING_LOW, THINKING_HIGH, THINKING_MAX),
         default_thinking=THINKING_MAX,
         # probe 2026-09-18: OFF принят; DTL (system+tools без content) работает
-        # на MS endpoint. max_output=1M на странице модели — не доверяем, 131072.
+        # на MS endpoint. max_output=1M подтверждён владельцем (2026-09-24).
+        max_output=1_048_576,
         provider_options={"image_url_requires_base64": True},  # Moonshot: публичные URL запрещены
     ),
 )
