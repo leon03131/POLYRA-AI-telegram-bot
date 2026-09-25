@@ -1,0 +1,890 @@
+POLYRA — ОБНОВЛЁННОЕ ЗАДАНИЕ KIMI ДЛЯ OPENCODE DESKTOP / V2
+Дата пакета: 24 сентября 2026 года.
+
+ТЫ — главный инженер и координатор исправлений текущего POLYRA AI Telegram Bot.
+Работай внутри уже настроенного OpenCode Desktop на текущей Kimi-модели владельца.
+Задача: реально исправить A01–A40, сохранить существующие модели, устранить причины
+нестабильности и добавить DeepSeek V4 Pro. Не заканчивать после нового аудита/плана.
+
+ЭТО ОСНОВНОЙ PROMPT. Копия KIMI_FIX_PROMPT.txt в audit_original/ — только историческая.
+Ниже встроены новые N01–N04, затем полный прежний список A01–A40 с тестами приёмки.
+Количество audit findings остаётся 40; N01–N04 — новые требования, а не ещё 4
+якобы найденные уязвимости.
+
+ПЕРВЫЕ ДЕЙСТВИЯ
+1. Прочитай этот файл, REQUIREMENTS_ADDENDUM.md, OPENCODE_SETUP.md, SUBAGENT_PLAN.md.
+   Сверь исходное ТЗ и актуальный checkout. Не заменяй текущий проект старым snapshot.
+2. Проверь реальные tools/permissions делегирования OpenCode. Установи предоставленные
+   project profiles безопасным скриптом, если это разрешено и нужно; проверь discovery.
+   Если текущая сессия их не видит, вызови имеющиеся штатные coding subagents с теми
+   же scopes. Нельзя объявлять субагентов запущенными без реальных child calls.
+3. Зафиксируй git status/commit, initial tests, ownership/dispatch и краткие контракты.
+   Делегируй независимые задачи, максимум четыре одновременно. Не выполнять весь
+   проект последовательно одним главным агентом при доступном делегировании.
+4. Внеси изменения и regression tests на текущем коде. Исправленное ранее перепроверь
+   и отметь already-fixed-and-verified. Новый полный аудит не заменяет реализацию.
+5. Сдай FIX_REPORT_V2.md по A01–A40 и N01–N04, model regression matrix,
+   реальные test logs/exit codes и список ограничений live-приёмки.
+
+Подробные старые доказательства читать адресно по своему scope. Не заставляй каждого
+субагента сначала перечитывать весь static_analysis.json и весь чужой код.
+Не расходуй ключи владельца на неконтролируемые probes. Не обещай фиксированное
+ускорение/время: параллельность организуй, результат докажи.
+
+РАЗДЕЛЕНИЕ РОЛЕЙ (8 специализаций, до 4 активных одновременно)
+- polyra-telegram: A — Telegram / streaming / Stop. Scope: app/bot/**; tests/unit/test_bot_helpers.py; tests/unit/test_bot_wiring.py; tests/unit/test_draft_streamer.py. Пункты: A02, A11, A18, A20, A21, A22.
+- polyra-miniapp: B — Mini App / UX / типы. Scope: miniapp/** кроме отдельно назначенного miniapp/e2e/**; frontend unit/component tests в собственном scope. Пункты: A01, A24, A25, A26, A28, A40, N04.
+- polyra-gemini: C — Gemini / pool / квоты. Scope: app/llm/gemini/**; app/llm/providers/gemini.py; tests/unit/test_gemini_pool.py; tests/unit/test_gemini_provider.py. Пункты: A06, A09, A10, A11, A23, A27, A30, A39.
+- polyra-alibaba: D — Alibaba / registry / DeepSeek V4 Pro. Scope: app/llm/providers/alibaba.py; app/llm/capabilities.py; app/llm/registry.py; scripts/smoke_providers.py; tests/unit/test_alibaba_provider.py; tests/unit/test_registry.py. Пункты: A06, A11, A23, A27, A30, A39, N03, N04.
+- polyra-context: E — context / memory / compaction. Scope: app/context/**; app/memory/**; tests/unit/test_context.py; tests/unit/test_compactor.py; tests/unit/test_memory.py. Пункты: A15, A16, A17, A18, A40.
+- polyra-search-security: F — tools / search / SSRF. Scope: app/search/**; app/security/ssrf.py; app/llm/tools/**; tests/unit/test_search.py; tests/unit/test_ssrf.py; tests/unit/test_tools.py. Пункты: A12, A19, A30, A31, A32, A33, A39.
+- polyra-db-api: G — DB / migrations / API / access. Scope: app/db/**; app/api/routes/**; app/api/auth.py; app/api/dependencies.py; app/services/** кроме generation.py и llm_factory.py; tests/unit/test_access.py; tests/unit/test_api.py; tests/unit/test_api_auth.py. Пункты: A01, A03, A04, A05, A08, A09, A12, A13, A14, A24, A25, A26, A28, A29, A34, A35, N04.
+- polyra-qa-release: H — regression / security review / release. Scope: новые tests/integration/test_fix_v2_*.py; новые miniapp/e2e/fix_v2_*.spec.ts; .agents/reports/fix-v2/polyra-qa-release/**; общие fixtures/CI/deployment только после отдельной передачи владения lead. Пункты: A36, A37, A38, A40, N01, N02, N03, N04.
+
+Главный агент владеет GenerationService, базовыми LLM contracts, main/lifecycle,
+общей интеграцией и выделенными shared files. Подробный exclusive scope и пример
+волн см. SUBAGENT_PLAN.md. Один файл — один активный writer; общие миграции ведёт G,
+registry/probe — D, без конкурирующих изменений C/B/E в этих файлах.
+
+==================================================
+НОВЫЕ ОБЯЗАТЕЛЬНЫЕ ТРЕБОВАНИЯ ВЛАДЕЛЬЦА N01–N04
+==================================================
+
+# Дополнение владельца к ТЗ и аудиту — версия 2
+
+Дата подготовки: 24.09.2026. Это задание на исправление и расширение существующего
+проекта, а не результат уже выполненных исправлений.
+
+## Приоритет документов
+
+1. Последние уточнения владельца, зафиксированные здесь (N01–N04).
+2. Обновлённый `KIMI_FIX_PROMPT.txt` в корне этого пакета.
+3. Первоначальное ТЗ `audit_original/ORIGINAL_REQUIREMENTS.txt`.
+4. Исторические A01–A40, доказательства и матрица требований из `audit_original/`.
+
+Новые требования дополняют первоначальное ТЗ; не отменяют безопасность, сохранность
+данных, запрет cross-model fallback и другие ограничения. Старый prompt внутри
+`audit_original/` — архивная копия, не основной запускной документ.
+
+Рабочая база — актуальная папка проекта, которую владелец открыл в OpenCode.
+`reference/AUDITED_SOURCE_SNAPSHOT.zip` нужен только для сравнения с аудитом.
+Не распаковывать старый снимок поверх текущего кода, не делать reset/clean/rebase/pull
+без проверки незакоммиченных изменений. Уже исправленные пункты подтверждать тестом,
+а не откатывать и исправлять второй раз. Старые строки/количество файлов могут отличаться.
+
+## N01 — обязательные реальные субагенты
+
+Главный агент обязан делегировать независимые части через настоящий механизм
+дочерних агентов OpenCode. Простое описание ролей в ответе, один агент с восемью
+заголовками, несколько shell-процессов или фиктивные отчёты не считаются делегированием.
+
+Использовать до четырёх одновременно активных субагентов; главный агент не входит
+в этот лимит. При наличии независимых готовых задач запускать 2–4 параллельно, а не
+дожидаться завершения каждого перед запуском следующего. Если механизм позволяет
+только последовательный вызов, указать ограничение, не выдавать его за параллельность.
+
+До начала массовых правок:
+- проверить фактические инструменты делегирования и права среды;
+- реально запустить доступных research/analysis субагентов;
+- завести `.agents/POLYRA_FIX_V2_DISPATCH.md`: scope, разрешённые файлы, зависимости,
+  реальное имя агента, время запуска/окончания, session/task reference, если среда его выдаёт;
+- назначить одного владельца каждому изменяемому файлу.
+
+Рекомендованы восемь специализаций из `SUBAGENT_PLAN.md`, работающих волнами,
+а не восемь одновременно. Главный агент владеет общей интеграцией и контрактами,
+просматривает каждый diff и выполняет общую приёмку.
+
+Субагентам запрещено рекурсивно создавать ещё субагентов, расширять собственный scope,
+самостоятельно переключать модель разработки или запускать неограниченные live probes.
+Общий лимит запросов к провайдерам и тестовых БД координирует главный агент.
+
+Если делегирование реально недоступно: проверить доступные штатные агенты/permissions,
+записать конкретную причину и необходимое действие пользователя. Не изображать запуск,
+не обходить запреты оболочки через собственный API-клиент или отдельный agent runtime.
+Выполнить доступную работу, но отметить N01 как blocked, а не silently выполненный.
+
+## N02 — среда разработки OpenCode Desktop
+
+Kimi — модель главного агента внутри уже настроенного OpenCode Desktop, а не
+предполагаемый отдельный Kimi CLI или автономный агент со своими tool names.
+
+Сначала определить доступную версию/ветку runtime и инструменты в текущей сессии.
+В документации OpenCode встречаются разные схемы: `task` / `permission.task` и
+`subagent` / `permissions`. См. S1–S4 в `OFFICIAL_SOURCES_2026-09-24.md`.
+Не смешивать схемы; не выдумывать `spawn_agent`, `parallel_agents`, `max_agents` и т.п.
+
+В комплекте есть проектные профили `opencode-overlay/.opencode/agents/polyra-*.md`.
+Они НЕ являются новыми Skills и НЕ являются внутренними LLM-субагентами Telegram-бота.
+Это инструкции исполнителям разработки. Они не запускаются автоматически от наличия файла.
+
+Разрешено установить профили штатным безопасным скриптом пакета. Скрипт не меняет
+provider/model/auth конфигурацию OpenCode, не перезаписывает существующие профили
+и не трогает production code. После установки проверить фактическое обнаружение агентов.
+Если текущая сессия не видит новые имена, использовать доступные штатные coding
+subagents с теми же scope и инструкциями; записать реальные имена в dispatch log.
+
+Не фиксировать `model` в профилях на неизвестный OpenCode provider ID: использовать
+текущую настроенную Kimi-модель родителя, проверив отсутствие нежелательного override.
+Нельзя менять модель разработки на DeepSeek только потому, что DeepSeek добавляется
+как пользовательская модель Telegram-бота.
+
+Не заменять целиком пользовательские `opencode.json`, `opencode.jsonc`, `AGENTS.md`
+или глобальные настройки. При необходимости предложить минимальный локальный merge,
+учитывая права; не включать глобальное «всё разрешено». Обновление Desktop не является
+автоматически обязательным шагом и не должно выполняться без необходимости.
+
+Описание scope в prompt — правило работы, а не жёсткая security sandbox.
+Настоящие ограничения инструментов/каталогов определяются установленной оболочкой.
+
+## N03 — все существующие модели сохранить, нестабильность исследовать
+
+Владелец сообщает, что модели из кода уже дают рабочие ответы, но иногда ошибаются.
+Это исходный факт эксплуатации по сообщению владельца, не наш live-тест каждой модели.
+Задача — найти и устранить причины нестабильности, а не сократить список моделей.
+
+Обязательный существующий набор:
+- пользовательские Gemini: `gemini-3.8-flash`, `gemini-3.7-flash`, `gemini-3.6-flash`;
+- пользовательские Alibaba: `qwen3.8-flash`, `qwen3.8-max`, `deepseek-v4.1-flash`,
+  `glm-5.3`, `kimi-k3`;
+- внутренняя: `gemini-3.5-flash-lite`.
+
+Сохранить также другие реальные модели, которые владелец уже добавил в актуальный
+checkout после аудита. Не считать перечисление выше разрешением удалить новые записи.
+
+Не удалять/переименовывать model IDs; не сбрасывать chat settings, permissions,
+историю и подтверждённые capabilities. Отсутствие ID в старых знаниях агента или
+на одной публичной странице не доказывает неработоспособность пользовательского proxy.
+
+Разделять независимые измерения:
+1. configured/enabled — административный выбор;
+2. credential validity — состояние конкретного ключа;
+3. availability/health — временная доступность endpoint/model;
+4. capability evidence — что подтверждено для параметра/сценария.
+
+Timeout, 429, 5xx, network error, skip/no-key или исчерпанный бюджет smoke test
+не означают «модель не существует» или «capability unsupported». Временная ошибка
+не должна удалять модель из registry, менять её ID, стирать успешное свидетельство
+capability или навсегда выключать её. TTL устаревшего результата отмечать отдельно.
+
+Подтверждённый отказ конкретного режима/параметра ограничивать этим режимом и
+endpoint/credential context, с понятной причиной. Один HTTP 200 с параметром означает
+его принятие, но не доказывает самостоятельную семантику режима. Не хранить секреты
+в cache key/log: использовать несекретный внутренний ID и версию credential.
+
+Исследовать минимум:
+- 400: неправильная форма payload, лишние/несовместимые параметры, tools, context;
+- 401/403: credential/project/permission, не путать с удалением самой модели;
+- 429/5xx/timeout: bounded retry, Retry-After, jitter, cooldown и общий deadline;
+- malformed SSE, fragmented frames/tool arguments, unexpected EOF, usage trailer;
+- reasoning-only/length-limited output, Stop, tool loop и повторные side effects;
+- рассогласование UI, saved settings, effective request и provider adapter.
+
+Не повторять автоматически запрос после видимого partial answer или выполненного
+tool side effect так, чтобы дублировать текст/действие. Retry/failover только
+в пределах явного контракта и той же модели; для Gemini — разрешённый переход
+между проектами, для Alibaba — тот же выбранный model ID и фиксированный endpoint.
+Нельзя молча выключать tools, thinking или images, чтобы выдать degraded запрос
+за успешный исходный пользовательский сценарий.
+
+До/после: параметризованные offline contract tests всех моделей и opt-in smoke matrix.
+Live-проверки ограничены общим бюджетом и числом попыток; расход по-прежнему учитывается.
+Несколько успешных проб не являются доказательством отсутствия всех будущих сбоев.
+
+Ссылка на существующие исправления: A06, A07, A10, A11, A13, A14, A16, A23, A25,
+A27, A30, A34, A35, A39. Не заменять эти исправления одним увеличением timeout.
+
+## N04 — добавить DeepSeek V4 Pro сквозным сценарием
+
+Это новая пользовательская модель Telegram-бота, дополнительная к Flash:
+- provider: `alibaba`;
+- model_id: `deepseek-v4-pro`;
+- display_name: `DeepSeek V4 Pro`;
+- internal_only: false;
+- выбранный endpoint: `https://dashscope.aliyuncs.com/compatible-mode/v1`;
+- тот же AlibabaProvider, DIRECT transport, `trust_env=False`;
+- не заменять `deepseek-v4.1-flash`, не выбирать Pro новой default-моделью самовольно.
+
+Не подключать прямой DeepSeek API, OpenRouter, Workspace/Singapore/international URL
+или иной provider вместо существующего Alibaba. Не закреплять автоматически alias
+на `deepseek-v4-pro-0813`: это другой точный ID. Версии/aliases описывать отдельно.
+
+### Начальный профиль и thinking
+
+По проверенным источникам S5–S7, а не по догадке:
+- профиль Pro текстовый; НЕ копировать image capability от V4.1 Flash;
+- function calling и structured outputs заявлены для China; отдельно проверить
+  реальный endpoint и нужный формат (JSON mode не равен strict schema);
+- документированные ceilings: context 1 000 000, output 393 216 токенов;
+  они не являются default output reservation и не требуют миллионного test prompt;
+- зафиксировать пределы/источник/дату в metadata, а рабочий output budget сделать
+  разумным и настраиваемым; input + output reserve + tools + safety margin
+  должны укладываться в конечный бюджет A16.
+
+Для ID `deepseek-v4-pro` без суффикса начальная схема:
+- DEFAULT / «По умолчанию провайдера»: не отправлять effort;
+- OFF: `enable_thinking=false`, показывать по действующему подтверждению режима;
+- HIGH: `enable_thinking=true`, `reasoning_effort=high`;
+- MAX: `enable_thinking=true`, `reasoning_effort=max`.
+
+Это стартовая реализация на основании docs, которую нужно сверить с реальным endpoint.
+При отсутствии live-доступа не блокировать всю интеграцию; явно пометить режимы
+как docs-based/unverified и использовать безопасный provider-default там, где ТЗ
+требует подтверждения перед показом. Не объявлять skip успешным подтверждением.
+
+У Pro без суффикса `low` документирован как alias `high`, поэтому отдельную кнопку LOW
+с обещанием более слабого reasoning не добавлять только из-за HTTP 200. Не переносить
+другую семантику snapshot `-0813` на этот ID. При новых противоречиях сохранить
+доказательства, разделить accepted и behavior-supported, не угадывать.
+
+Не передавать `thinking_budget`, Qwen `preserve_thinking` или GLM `clear_thinking`
+просто по аналогии. `enable_thinking` в raw HTTP находится на верхнем уровне;
+при SDK использовать поддерживаемый способ передачи. Проверить
+`max_completion_tokens`; он должен учитывать reasoning вместе с final answer.
+Слишком маленький test budget и `finish_reason=length` — не evidence unsupported.
+
+### Что именно реализовать
+
+1. Registry/capability metadata и безопасные DB overrides; без model-specific if в handlers.
+2. Alibaba payload mapping, streaming, usage, ошибки, Stop и tools; reasoning не показывать.
+3. Список `/models` или фактический API проекта, выбор модели/режима в Mini App,
+   сохранение per-chat/per-user settings, reload, effective settings.
+4. Admin model access: новая отдельная галочка; explicit allowlist самопроизвольно
+   не расширять. Режим unrestricted наследует новую модель по общей явной семантике.
+   Владелец видит Pro; пустой allowlist остаётся запретом всех моделей.
+5. Provider/model health, smoke/probe cache, статистика и аудит; Pro учитывается
+   отдельно от Flash. Cache key разделяет точные ID и не раскрывает ключ.
+6. Probe enumeration из registry без старых hardcoded списков: минимум 10 моделей
+   baseline (9 пользовательских + 1 внутренняя), плюс добавленные позднее владельцем.
+7. Фото при выбранном Pro: понятная ошибка text-only, без молчаливой потери фото
+   и без запроса в другую модель; указать доступные image-capable альтернативы
+   для ручного выбора в рамках текущих permissions.
+8. README/vendor docs/tests и миграции существующей БД, только если схема/seed
+   действительно требуют миграции. Историю и настройки не сбрасывать.
+
+### Обязательная приёмка N04
+
+Выдать пользователю Pro -> выбрать в существующем чате -> сохранить -> reload ->
+написать текст -> получить final stream -> завершить usage/run -> увидеть правильную
+модель в истории/статистике. Запретить Pro этому же пользователю -> реальный server-side
+отказ до provider call. Flash и остальные модели продолжают работать.
+
+Offline: payload, DEFAULT/OFF/HIGH/MAX, отсутствие лишних параметров, text-only guard,
+fragmented SSE, final usage after finish, no reasoning leak, tool roundtrip, Stop,
+ошибки/partial/no fallback, exact ID в request. UI/API/settings/permissions tests обязательны.
+
+Live: только при разрешённом флаге и доступном секрете через существующее хранилище;
+зафиксировать дату, endpoint label, model ID, режим, финальный статус, usage/latency,
+masked error category и limitations. Не обещать live-работу до такой проверки.
+
+==================================================
+ИСПРАВЛЕНИЯ ПО ИСХОДНОМУ АУДИТУ A01–A40
+==================================================
+
+Применять с N01–N04. В частности, историческое слово «unsupported» не распространять
+на timeout/429/5xx/skip/no-key. Старый аудит не отменяет сообщение владельца о реально
+работающих моделях. Номера строк относятся к исходному снимку.
+
+ТЫ — lead engineer, которому поручено ИСПРАВИТЬ существующий POLYRA AI Telegram Bot по результатам полного аудита. Не ограничивайся повторным аудитом, планом или косметическим изменением README. Внеси рабочие изменения в код, миграции, тесты и UI, затем докажи исправление.
+
+Вход: исходный репозиторий/ZIP, первоначальное ТЗ и этот документ. Исторические документы находятся в audit_original/: AUDIT.md, findings.json, REQUIREMENTS_MATRIX.md, CODE_EVIDENCE.md, TEST_RESULTS.md и regressions/README.md. Сначала прочитай обзор и относящиеся к твоему scope доказательства; не путай старый prompt этой папки с текущим. Исходный ZIP приложен как reference/AUDITED_SOURCE_SNAPSHOT.zip. Проверенный baseline — архив POLYRA-AI-telegram-bot-master (2).zip, SHA-256 37f7f26dc7503319db3b7bc90136f273cde3003a4ebaae54e39157f892ef6294, 215 файлов. Если твой checkout уже изменён, сопоставь diff и подтверждай замечания на текущей версии; номера строк могут сместиться. Не откатывай правильные изменения ради совпадения со старым снимком.
+
+ЦЕЛЬ
+Довести обязательные функции исходного ТЗ до проверяемого end-to-end состояния. В аудите 40 сгруппированных пунктов: 20 P1, 19 P2, 1 P3. P1/P2 — не игнорировать; P3 — отдельные улучшения, не повод задерживать исправление потери данных. Риски и неподтверждённые live-сценарии сначала воспроизведи; нельзя сообщать, что все 40 — доказанные уязвимости.
+
+НЕИЗМЕНЯЕМЫЕ ОГРАНИЧЕНИЯ
+1. Owner — только Telegram numeric user_id 795063564, не username и не старый флаг is_owner из БД. Подпись/freshness initData и ownership ресурсов проверяются сервером.
+2. Gemini — через https://extraordinary-piroshki-4e3b92.netlify.app. Не заменять на прямой Google endpoint. Один pool разных проектов, квоты по project+model, без переключения на другую модель.
+3. Alibaba — только https://dashscope.aliyuncs.com/compatible-mode/v1, DIRECT и trust_env=False. Не переводить на Workspace/Singapore/international endpoint. Proactive RPM/TPM/RPD для Alibaba не вводить; обработка его реальных ошибок обязательна.
+4. Существующие модели сохранить: gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash; qwen3.8-flash, qwen3.8-max, deepseek-v4.1-flash, glm-5.3, kimi-k3. Внутренняя — gemini-3.5-flash-lite. Добавить отдельную пользовательскую deepseek-v4-pro через тот же AlibabaProvider; не заменять Flash. Сохранить также дополнительные модели из актуального checkout владельца. По сообщению владельца существующие модели работают, но нестабильно. Исследовать причины ошибок по N03; transient errors и отсутствие live-доступа не доказывают unsupported/nonexistent. Не удалять IDs и не подменять модель другой.
+5. Reasoning никогда не показывается пользователю и не складывается как обычный текст сообщения. Необходимые function-call thought signatures/private protocol metadata сохраняются внутри adapter в нужном виде; не ломать уже существующую поддержку Gemini signatures.
+6. Не хранить реальные secrets в git/логах, не отключать TLS, не обходить SSRF простым снятием проверок. Без shell/Python/filesystem tools для модели, без CAPTCHA bypass/stealth.
+7. Не удалять историю/реальные данные ради прохождения тестов. Миграции должны работать с пустой и существующей БД. Redis, публичный signup, payments, audio/video/documents, обязательный pgvector — не добавлять без потребности исходного scope.
+8. Dynamic Tool Loading/Playwright/semantic layer остаются optional там, где это сказано в ТЗ. Важнее реальная работа основных функций, чем наличие новых модулей.
+
+ПОРЯДОК РАБОТЫ
+Сначала сформируй краткий список инвариантов, сохрани baseline-команды/результаты и подготовь регрессионные тесты, демонстрирующие дефекты. Затем исправляй вертикальными сценариями с логическими коммитами. Не правь тесты так, чтобы они просто принимали текущий баг. ОБЯЗАТЕЛЬНО используй реальные субагенты OpenCode по N01/N02 и SUBAGENT_PLAN.md: не более четырёх одновременно, непересекающиеся writable scopes, проверяемый dispatch log. Общие GenerationService, LLMEvent, policy/settings contract и схему БД согласуй и интегрируй централизованно. Не подменяй запуск описанием ролей.
+
+ЭТАПЫ
+A. API/UI/security policy: A01–A04, A12–A14, A24–A26. Согласуй UUID, owner, []/all policy, effective settings, disabled credentials.
+B. Generation/accounting: A05–A10, A23, A34, A39. Определи терминальный контракт stream, finalizer, durable usage ledger, атомарные reservations/locks, aggregate usage и отмену.
+C. Context/memory/photos: A15–A18. Границы summary, конечный token budget, недопустимость пустой успешной summary, фото в истории.
+D. Transport/security delivery: A11, A19–A22, A30, A37. Stop, SSRF, безопасный Telegram renderer, throttling, lifecycle/readiness/shutdown.
+E. Required product completion: A27–A29, A31–A33, A35. Capability cache и безопасные probes, полный admin workflow, надёжный поиск/источники/metrics.
+F. Quality/release: A36, A38 и обоснованные A40. PostgreSQL integration, frontend E2E, Docker smoke, CI и честные docs. A36-тесты добавляй и выполняй на каждом этапе, не откладывай все проверки до конца.
+
+Диагностические скрипты из пакета проверяют наличие БАГОВ в старом снимке. Их reproduced=true — это не зелёный тест исправленной системы. Перепиши сценарии как assertions правильного поведения, сохранив исходные условия и объяснив изменения.
+
+ДАЛЕЕ — ПОЛНЫЙ СПИСОК ИСПРАВЛЕНИЙ И ТЕСТОВ ПРИЁМКИ.
+
+
+
+A01 [P1] Настройки существующего чата ломаются из-за преобразования UUID в число
+
+Файлы: miniapp/src/pages/ChatSettingsPage.tsx:26-38; miniapp/src/api/types.ts:50-61; app/api/routes/chats.py:46-58
+
+Основание и степень подтверждения: Подтверждено кодом и отдельной JavaScript-проверкой. Backend возвращает id как строковый UUID, frontend объявляет Chat.id числом и выполняет Number(id). Для UUID результат NaN; сравнение c.id === chatId не находит чат. Та же неверная типизация встречается у MemoryItem, GeminiProject и AuditEntry, хотя не каждый их CRUD из-за этого уже сломан.
+
+Исправление: Ввести UUID/string-типы на всём пути API—hooks—components; убрать Number(id); по возможности генерировать клиентские типы из OpenAPI. Проверить BackButton-условие App.tsx, рассчитанное на цифровые id.
+
+Тест приёмки: E2E: создать чат, открыть по UUID, изменить модель/thinking/prompt, перезагрузить, проверить сохранённые значения. Ни один запрос не содержит NaN. Типы всех public UUID согласованы с API.
+
+
+A02 [P2] Команда /admin ведёт на 404; menu button настраивается не при startup
+
+Файлы: app/bot/routers/commands.py:155-168; miniapp/src/App.tsx; app/api/app.py:65-67; app/main.py:110-118
+
+Основание и степень подтверждения: /admin формирует URL /admin, но frontend использует HashRouter. StaticFiles(html=True) не делает универсальный SPA fallback. В изолированном тесте настоящего create_app с index.html: / → 200, /admin → 404. В startup вызывается setup_bot_commands, но menu button устанавливается только при /start.
+
+Исправление: Для HashRouter использовать /#/admin и единый конструктор Mini App URL. Настраивать общий MenuButtonWebApp при startup, оставив корректный per-chat путь при необходимости.
+
+Тест приёмки: Проверить URL каждой команды и открытие в Telegram. /admin открывает административный маршрут, прямой запуск Mini App работает, menu button есть после чистого старта.
+
+
+A03 [P1] Пустой список разрешённых моделей превращается в доступ ко всем моделям
+
+Файлы: miniapp/src/admin/AdminUsersPage.tsx:206-211; app/services/admin.py:222-245; app/db/repositories/access.py:68-73; app/services/access.py:109-114
+
+Основание и степень подтверждения: UI может отправить allowed_models=[]. Сервис удаляет старые разрешения и не вставляет новых. Репозиторий трактует отсутствие строк как None, то есть отсутствие ограничений. Диагностический тест воспроизводит переход empty rows → unrestricted policy.
+
+Исправление: Разделить явные режимы unrestricted и allowlist; пустой allowlist должен запрещать всё. Сделать безопасную миграцию существующих правил и использовать одну политику на API и генерации.
+
+Тест приёмки: Через настоящий admin API сохранить null, [], [одна модель] и проверить фактический вызов провайдера: соответственно все, ни одной, только одна. После reload UI сохраняет различие.
+
+
+A04 [P1] Admin authorization доверяет флагу is_owner помимо numeric Telegram ID
+
+Файлы: app/api/dependencies.py:33-35; app/bot/routers/commands.py:155-168; app/api/routes/auth.py; KNOWN_ISSUES.md:39-42
+
+Основание и степень подтверждения: Проверка owner принимает user.is_owner OR совпадение numeric ID; команда /admin ориентируется на флаг. KNOWN_ISSUES уже признаёт, что прежний is_owner автоматически не снимается. Самостоятельного повышения прав обычным внешним пользователем в проверенном коде не найдено: проблема проявляется при устаревшем/ошибочном флаге в БД.
+
+Исправление: Единая функция owner identity: только telegram_user_id == 795063564 либо явно согласованный владельцем конфигурационный идентификатор. Флаг БД не должен давать полномочия. Миграцией очистить некорректные флаги.
+
+Тест приёмки: Non-owner с is_owner=True получает 403 на каждом admin endpoint; owner с is_owner=False сохраняет доступ. Username не участвует в решении.
+
+
+A05 [P1] Нет атомарного захвата чата и пользовательских лимитов перед генерацией
+
+Файлы: app/services/generation.py:323-347; app/services/generation.py:650-719; app/services/generation.py:787-807; app/db/models/generation_run.py:17-31
+
+Основание и степень подтверждения: Проверка find_active_for_chat выполняется в _prepare, а запись в in-memory registry — после нескольких await и создания run. DB не содержит уникального ограничения на активную генерацию чата. Пользовательские concurrent/daily limits также читаются до создания reservation. Это подтверждённая check-then-act гонка; реальный параллельный PostgreSQL-прогон в данной среде не выполнен.
+
+Исправление: Захватывать per-chat lock до чтения/изменения истории и дополнять DB-инвариантом: partial unique index для queued/running либо эквивалентной транзакционной блокировкой. Отдельно атомарно резервировать per-user concurrency и суточные лимиты.
+
+Тест приёмки: Barrier-тест с двумя соединениями PostgreSQL: ровно один запуск на один чат; ограничения пользователя соблюдаются между разными чатами и процессами. Нет потерянных сообщений и оставшихся locks после исключения.
+
+
+A06 [P1] Done обрывает поток до usage и финализации Gemini-пула
+
+Файлы: app/services/generation.py:595-648; app/llm/providers/alibaba.py:243-260; app/llm/gemini/pool.py:219-230; app/context/compactor.py:114-125
+
+Основание и степень подтверждения: _consume и collect_text делают break на Done. Alibaba может отдавать Usage следующим SSE chunk после finish_reason. GeminiProjectPool вызывает report_success/reconcile после yield событий провайдера, в том числе Done. Два отдельных воспроизведения: Alibaba даёт TextDelta, Done, Usage, но consumer Usage не получает; Gemini consumer с break не вызывает mark_success и reconcile, даже при последующем aclose.
+
+Исправление: Определить единый контракт: Done ровно один раз после получения usage и обязательной финализации. Не оставлять критические side effects после последнего yield. Закрывать все уровни async iterator/HTTP response через finally/aclosing на success/error/cancel.
+
+Тест приёмки: Прогнать production provider → factory → pool → GenerationService на записанном SSE: usage-trailer учтён, health/reconcile выполнены ровно один раз, transport закрыт. Аналогичные проверки для внутренних задач и отмены.
+
+
+A07 [P1] Даже после исправления Done расход разных tool-раундов не суммируется
+
+Файлы: app/services/generation.py:451-452; app/services/generation.py:820-934; app/db/models/generation_run.py:33-41; app/db/repositories/generation_runs.py:30-66
+
+Основание и степень подтверждения: usage в _stream_loop заменяется последним outcome. В cancelled run finish не получает token fields. gemini_project_id объявлен в модели, но фактически не записывается при выдаче ключа/завершении запуска. Для ошибок после частичного ответа также нет полноценного учёта уже потраченного расхода.
+
+Исправление: Разделить per-provider-call usage и агрегат generation_run, суммировать только отдельные вызовы, не cumulative chunks одного вызова. Хранить project selection/attempts, cancellation/error usage и различать unknown usage от нуля.
+
+Тест приёмки: Два tool-раунда с usage 100/20 и 200/30 дают 300/50; repeated cumulative usage не удваивается. Cancelled/failed вызовы сохраняют известные метрики и project id.
+
+
+A08 [P1] Удаление чата обнуляет суточный учёт запросов пользователя
+
+Файлы: app/db/models/generation_run.py:18-25; app/db/migrations/versions/0002_chat_core.py; app/db/repositories/generation_runs.py:68-87; app/api/routes/chats.py:170-179
+
+Основание и степень подтверждения: generation_runs.chat_id имеет ON DELETE CASCADE. Дневные лимиты считаются по существующим generation_runs. Удаление своего чата доступно пользователю. На исходных ORM-моделях с SQLite foreign_keys=ON воспроизведено: до удаления 1 run/300 токенов, после — 0 runs. Это проверка CASCADE-семантики, не замена PostgreSQL integration test.
+
+Исправление: Вынести usage/reservations в отдельный долговечный ledger, не удаляемый вместе с разговором; либо безопасно отвязать минимальные метрики от chat через SET NULL/tombstone. Удаление содержимого чата и сохранение минимального учёта должны иметь явную политику приватности.
+
+Тест приёмки: Через реальный API исчерпать requests/day, удалить все свои чаты, создать новый: запрос всё ещё отклонён до следующего окна. История удаляется, минимальный ledger остаётся.
+
+
+A09 [P1] Gemini quota check/reserve не атомарны, reconcile попадает в другое окно
+
+Файлы: app/llm/gemini/quota.py:98-118; app/llm/gemini/store_db.py:80-122; app/db/repositories/gemini.py:237-306
+
+Основание и степень подтверждения: get_minute_usage, get_daily_usage и reserve выполняются раздельно, DB-адаптер открывает отдельные сессии. ON CONFLICT защищает прибавление, но не условие допуска. Barrier-воспроизведение: лимит RPM=1, два запроса оба разрешены. Reconcile вычисляет minute/day по времени завершения: запрос предыдущей минуты получает токены в новой, где requests_count=0.
+
+Исправление: Единая транзакционная check-and-reserve операция с блокировкой/условным UPDATE. Возвращать reservation_id и исходные minute/day, выполнять idempotent reconcile именно reservation. Добавить bounded token reservation и освобождение/сверку при отмене.
+
+Тест приёмки: PostgreSQL: конкурентные RPM/RPD/TPM проверки без превышения; тесты перехода минуты, Pacific day и DST; повторный reconcile не удваивает расход.
+
+
+A10 [P2] Cooldown и retry Gemini не соответствуют требуемой области действия
+
+Файлы: app/llm/gemini/pool.py:162-190; app/llm/gemini/pool.py:195-244; app/db/models/gemini.py
+
+Основание и степень подтверждения: report_error прямо указывает, что model_id не влияет на cooldown. 429 охлаждает проект целиком. PERMISSION_DENIED автоматически отключает credential, хотя такой код сам по себе не доказывает постоянную неисправность ключа. Для 5xx/network/timeout реализован переход к следующему проекту, но нет требуемого небольшого bounded retry того же проекта.
+
+Исправление: Отделить credential health от project+model cooldown; классифицировать 403 по документированным признакам. Ввести ограниченный retry с jitter, общим deadline и максимум одним проходом пула; после видимого текста не перезапускать ответ.
+
+Тест приёмки: 429 модели A не блокирует B; 400/safety не обходят пул; 401 отключает ключ; transient 403/5xx не приводят к бесконечным попыткам; model_id никогда не меняется.
+
+
+A11 [P1] Stop не гарантирует немедленного прерывания HTTP stream и tools
+
+Файлы: app/services/generation.py:106-112; app/services/generation.py:473-494; app/llm/providers/alibaba.py; app/llm/providers/gemini.py
+
+Основание и степень подтверждения: GenerationRegistry.stop устанавливает asyncio.Event, но не прерывает stored task/активное чтение. Адаптеры проверяют cancellation после получения следующей строки; read timeout — 300 секунд. В пачке tool calls cancellation проверяется после всей пачки, а не перед каждым вызовом и во время ожидания.
+
+Исправление: Дать generation supervisor управление активным task/response, прерывать ожидание transport и tools, проверять token перед каждым side effect. Сделать идемпотентный finalizer, сохраняющий partial и cancelled status даже при CancelledError.
+
+Тест приёмки: Mock stream, навсегда ожидающий следующий chunk, прекращается за локально заданный короткий deadline без ожидания read timeout. Ни один следующий tool в batch после Stop не запускается. Partial сохранён один раз, ресурсы закрыты.
+
+
+A12 [P1] Memory Off/Web Off не являются полной серверной политикой tools
+
+Файлы: app/services/generation.py:397-405; app/services/generation.py:464-475; app/services/generation.py:749-758; app/llm/tools/runner.py:67-78
+
+Основание и степень подтверждения: memory_enabled влияет на retrieval/extraction, но remember/forget_memory остаются в advertised tools при разрешении memory у пользователя. Web Off убирает описания web-tools, однако ToolRunner получает полный registry и проверяет только grant, не фактически разрешённый набор текущего запроса.
+
+Исправление: Вычислять effective allowed tools один раз из global/user/chat/model policy и использовать его и в LLM request, и в runner. Перепроверять право и cancellation перед side effect; неизвестные/необъявленные вызовы отклонять.
+
+Тест приёмки: Memory Off: нет retrieval/extraction/remember/forget. Web Off: подставленный web_search/open_url получает denied без сети. Проверить те же ограничения после изменения прав между tool-раундами.
+
+
+A13 [P1] Настройки Admin → System сохраняются, но генерация их не читает
+
+Файлы: app/api/routes/admin_system.py:73-115; app/main.py:45-87; app/services/generation.py:749-782; app/config.py
+
+Основание и степень подтверждения: Admin API читает/пишет system_settings. Runtime строит ContextBuilder, Compactor и GenerationService из environment Settings; чтения SystemSettingRepository в пути генерации нет. Даже перезапуск сам по себе не подключает эти DB-значения. memory_extraction_min_chars из Settings дополнительно не передан конструктору MemoryExtractor.
+
+Исправление: Сделать единый SettingsService с явно определённым приоритетом chat → user → DB system → bootstrap env, типизированными effective settings и инвалидацией cache. Честно отделить live-настройки от restart-required параметров.
+
+Тест приёмки: Изменение через Admin API отражается в следующем настоящем LLMRequest и поведении compaction/tools, а GET показывает те же effective значения. Проверить наследование null и перезапуск.
+
+
+A14 [P1] Отключённый Alibaba credential снова активируется через env fallback
+
+Файлы: app/services/credentials.py:10-23; app/services/llm_factory.py:48-63; app/api/routes/admin_providers.py
+
+Основание и степень подтверждения: Если DB credential существует, но enabled=False, get_provider_api_key возвращает env_fallback. Изолированная проверка actual function с disabled-записью и демонстрационным env key подтверждает возврат ключа.
+
+Исправление: Использовать env fallback только при отсутствии DB-конфигурации. Явно отключённый credential — абсолютный запрет. Не смешивать provider enablement с наличием/отсутствием секрета; закрывать устаревшие cached clients.
+
+Тест приёмки: Матрица absent/enabled/disabled × env present/absent; disabled всегда означает ноль HTTP-вызовов. Переключение вступает в силу без скрытого возврата к bootstrap key.
+
+
+A15 [P1] История теряется из контекста до гарантированной суммаризации
+
+Файлы: app/services/generation.py:707-709; app/services/generation.py:773-784; app/context/builder.py:107-147; app/db/models/chat_summary.py
+
+Основание и степень подтверждения: В _prepare берутся только recent_history_limit*2 сообщений (по умолчанию 40), независимо от полного объёма ещё не покрытой summary истории. При наличии любой summary builder оставляет keep_recent (10), но не получает covered_until_message_id. Воспроизведение: 20 ещё не покрытых сообщений + старая summary → только последние 10, needs_compaction=False.
+
+Исправление: Строить контекст по точной границе покрытия summary, а не по факту её наличия. Выбирать весь непокрытый сегмент в рамках бюджета; перед исключением старого материала создавать/обновлять summary либо явно сигнализировать невозможность вместить контекст. Сохранять raw history неизменной.
+
+Тест приёмки: Диалоги на 60–100 сообщений: факт из раннего непокрытого сообщения остаётся в raw context или summary. После первой summary новые сообщения не выпадают до следующей compaction. Проверить реальные выборки PostgreSQL.
+
+
+A16 [P1] TokenBudget не ограничивает фактически отправляемый запрос
+
+Файлы: app/context/builder.py:107-147; app/context/token_budget.py; app/services/generation.py:430-437; app/services/generation.py:776-784
+
+Основание и степень подтверждения: Recent window сохраняется даже при превышении бюджета. Current message добавляется после budget check; описания tools собираются позже, новые tool results между раундами не перебюджетируются. max_output_tokens не передаётся в пользовательский LLMRequest, хотя budget резервирует output. Воспроизведение: при 80 доступных токенах builder возвращает примерно 1000 и не просит compaction.
+
+Исправление: Считать конечный request: system, memories, summary, recent, current, images, tools, tool results, output reserve и margin. Согласовать max_output_tokens с budget/model capabilities; повторять проверку перед каждым LLM call. Для слишком большого current input — понятный отказ/контролируемое уменьшение, не тихая потеря смысла.
+
+Тест приёмки: Property/boundary tests полного payload; большой current message, image и много tool results не обходят лимит. В каждом request max_output_tokens согласован с budget. Нет теста, объявляющего превышение бюджета нормой.
+
+
+A17 [P1] Пустой JSON считается успешной summary; фоновые compaction могут перезаписываться
+
+Файлы: app/context/compactor.py:91-107; app/context/compactor.py:220-304; app/db/repositories/chat_summaries.py:24-47; app/services/generation.py:546-593
+
+Основание и степень подтверждения: _normalize_summary принимает {} и превращает его в пустые поля; это воспроизведено. Дальше summary и covered_until могут быть сохранены как успешные. Compactor загружает list_all, не ограничивает размер внутреннего prompt и не использует optimistic version/CAS при обновлении summary. Фоновые задачи не сериализованы по chat_id.
+
+Исправление: Строгая schema плюс семантические проверки непустого результата; максимум один repair, при неудаче границу покрытия не менять. Порционный compaction с бюджетом внутренней модели; versioned CAS или per-chat worker/lock и snapshot boundary.
+
+Тест приёмки: {}, неверные типы, пустая summary для непустого сегмента не продвигают coverage. Две задачи с обратным порядком завершения не откатывают boundary. Большой сегмент обрабатывается ограниченными порциями.
+
+
+A18 [P1] Фото не сохраняет Telegram file_id и исчезает из последующей истории LLM
+
+Файлы: app/bot/routers/photos.py:59-64; app/db/repositories/messages.py:28-61; app/context/builder.py:39-46; app/services/generation.py:255-265; app/services/chats.py:89-117
+
+Основание и степень подтверждения: Текущий photo router передаёт data_base64 и MIME, но не telegram_file_id. Репозиторий правильно не пишет base64 в БД, однако после этого у image part не остаётся файла. Репродукция actual add_message подтверждает пустой telegram_file_id. В builder/legacy build_messages старые image parts дополнительно отбрасываются. В ChatService есть старый корректный способ записи file_id, но текущий router его не использует.
+
+Исправление: Сохранять file_id/file_unique_id, размер, MIME и необходимые metadata; внедрить bounded rehydration изображения при построении multimodal context. Существующие неполные записи обрабатывать явно как невосстановимые, не выдумывать отсутствующие данные.
+
+Тест приёмки: Photo+caption → запись file_id без base64 → перезапуск → follow-up получает ImagePart. Неподдерживающая фото модель выдаёт понятный отказ и список разрешённых image-capable моделей.
+
+
+A19 [P1] SSRF-защита оставляет DNS rebinding / resolve-then-connect окно
+
+Файлы: app/security/ssrf.py:50-71; app/search/fetcher.py:91-108; app/search/fetcher.py:140-148; KNOWN_ISSUES.md:36-38
+
+Основание и степень подтверждения: URL проверяется резолвером, но затем httpx подключается к исходному hostname с отдельным DNS resolution. Проверенный IP не привязан к соединению. Private IP/scheme/redirect checks уже есть и полезны; оставшийся риск прямо признан авторами в KNOWN_ISSUES. Live-эксплуатация против сети владельца не выполнялась.
+
+Исправление: Использовать transport/resolver, соединяющийся только с проверенным IP с правильными Host и TLS SNI; сохранять все redirect checks. Дополнить egress-запретом private/link-local/metadata и deadline. Нельзя исправлять отключением TLS verification.
+
+Тест приёмки: Детерминированный тест public DNS при validation → private DNS при connect блокируется. Проверить IPv4/IPv6, redirects, mixed A/AAAA, TLS hostname и отсутствие реального соединения к запрещённому адресу.
+
+
+A20 [P1] Fallback Telegram отправляет raw LLM text с глобальным HTML parse_mode
+
+Файлы: app/bot/dispatcher.py:30-38; app/bot/streaming/draft.py:150-180; app/bot/streaming/draft.py:218-251; app/services/generation.py:880-885; app/bot/routers/commands.py:127-135
+
+Основание и степень подтверждения: Bot создан с default parse_mode=HTML. send_message_draft/send_message/edit_message_text и отправка partial не задают parse_mode=None и не экранируют произвольный текст. Текст с <div>, незакрытым тегом или частью кода способен вызвать TelegramBadRequest. Это протокольный вывод из кода и документации; live Telegram-проверка не выполнена.
+
+Исправление: Для plain transport явно parse_mode=None либо безопасный renderer/entities с корректным разбиением. Не отправлять произвольный LLM HTML как доверенную разметку; экранировать пользовательские фрагменты в служебных HTML-ответах.
+
+Тест приёмки: Тексты с HTML/XML, сравнениями, амперсандами, code fences и emoji доходят без ошибок во всех трёх tiers и при Stop. Ошибка финальной доставки отражается отдельно от успешного завершения LLM.
+
+
+A21 [P2] Длинный rich answer/partial обрезается; final edit может дублировать ответ
+
+Файлы: app/bot/streaming/draft.py:31-74; app/bot/streaming/draft.py:130-182; app/services/generation.py:877-885
+
+Основание и степень подтверждения: Финальная rich-отправка использует _tail(text, RICH_LIMIT), то есть тот же принцип обрезки, что и временный draft. _tail добавляет префикс сверх выбранного хвоста; это может превышать 32768. При Stop частичный ответ ограничивается первым MESSAGE_LIMIT фрагментом. В tier 3 «message is not modified» попадает в общий fallback, отправляющий новое сообщение.
+
+Исправление: Tail допустим только для временного draft. Final и cancelled partial разбивать без потерь по настоящим лимитам Telegram, учитывая префиксы/разметку. Обрабатывать not-modified как успешную идемпотентную финализацию.
+
+Тест приёмки: Ответы 4096+, 32768+ и длинный partial после Stop сохраняют весь текст и порядок. Повторная finalize не создаёт дубликат. Отдельно проверить Unicode и границы форматирования.
+
+
+A22 [P2] Throttle не обрабатывает retry_after и ломается после первой ошибки flush
+
+Файлы: app/bot/streaming/draft.py:110-127; app/bot/streaming/draft.py:189-251; tests/unit/test_draft_streamer.py
+
+Основание и степень подтверждения: append вызывает flush только когда _last_flush не None. Если первый force flush упал transient ошибкой, значение остаётся None и автообновлений больше нет до финала. После более поздних ошибок timestamp остаётся старым: каждый новый delta может снова инициировать запрос. TelegramRetryAfter не имеет отдельной обработки.
+
+Исправление: Разделить last_success и next_attempt_at, учитывать retry_after, применять bounded backoff/jitter и coalescing буфера. Не менять capability tier при временном rate limit. Сохранять deadline отмены независимо от Telegram network retry.
+
+Тест приёмки: Первый flush падает — последующий текст автоматически возобновляет поток. Серия 429 не превышает разрешённую частоту; счётчик вызовов не растёт на каждый token. Stop работает во время backoff.
+
+
+A23 [P2] Незавершённый/повреждённый SSE может быть принят за успешный ответ
+
+Файлы: app/llm/providers/alibaba.py; app/llm/providers/gemini.py; app/services/generation.py:595-648
+
+Основание и степень подтверждения: SSE-парсеры пропускают некоторые malformed payloads; consumer допускает обычное завершение iterator без обязательного terminal Done. Нет полной проверки контракта «получен валидный finish vs соединение тихо оборвалось». Это статический вывод; комбинации реальных provider/proxy отказов требуют fixture/live проверки.
+
+Исправление: Явная state machine SSE: validate frame/chunk structure, собирать tool calls до полного конца, классифицировать malformed response/unexpected EOF. При partial не выполнять молчаливый повтор с другим ключом и не обозначать незавершённый ответ как успешный.
+
+Тест приёмки: Фикстуры EOF до finish, malformed JSON, error frame после text, пустой choices/usage trailer, fragment tool args, [DONE] и штатный конец каждого провайдера дают определённый ожидаемый статус.
+
+
+A24 [P2] Архив и длинные списки чатов недоступны через Mini App
+
+Файлы: app/api/routes/chats.py:79-86; app/db/repositories/chats.py:29-43; miniapp/src/pages/ChatsPage.tsx:147-150; miniapp/src/pages/MemoryPage.tsx; app/api/routes/memory.py
+
+Основание и степень подтверждения: GET /chats возвращает только неархивные записи и использует repository limit=50 без API pagination. UI пытается выделять архивные чаты из этого же ответа. Поэтому архивная вкладка не получает данные, а старые чаты за лимитом нельзя выбрать. Аналогично следует довести пагинацию управления памятью, а не ограничиваться первыми записями.
+
+Исправление: API list с cursor/pagination и archived filter; отдельное получение чата по UUID. Согласовать current-chat при archive/delete/open, явно решить поведение активной генерации. UI подгружает страницы и корректно восстанавливает архив.
+
+Тест приёмки: Создать 60 чатов, архивировать несколько, открыть и восстановить самый старый. Удаление/архив текущего чата корректно обновляет выбор. Все записи памяти доступны постранично.
+
+
+A25 [P2] Effective settings и модельная валидация расходятся между UI, API и runtime
+
+Файлы: app/api/routes/chats.py:46-58; miniapp/src/pages/ChatSettingsPage.tsx:30-38; miniapp/src/components/ChatSettingsForm.tsx; app/api/routes/settings.py:67-80; app/services/generation.py:171-195
+
+Основание и степень подтверждения: _chat_out не возвращает system_prompt_override; UI сбрасывает prompt в пустую строку и не загружает существующий override. Наследуемая системная модель не отражается как effective model для thinking selector. Runtime при неизвестном сохранённом model_id молча выбирает default_model; проверки выбора не везде учитывают enabled. При явном null новая thinking-валидация может использовать прежнюю модель через or.
+
+Исправление: Возвращать raw overrides и effective settings отдельно. Валидировать конечную комбинацию model/thinking с учётом field presence и null, enabled/internal_only/user permissions. Неизвестная или отключённая выбранная модель — понятный отказ с предложением выбрать, а не fallback.
+
+Тест приёмки: Read/edit/reload существующего prompt без потерь; наследование global/user/chat; одновременный PATCH model=null+thinking; disabled/unknown model не вызывает другую модель. Исправить тест, который сейчас ожидает unknown-model fallback.
+
+
+A26 [P2] Admin не может снять числовой лимит; обещанная остановка при revoke не реализована
+
+Файлы: app/services/admin.py:91-100; miniapp/src/admin/AdminUsersPage.tsx:24-30; miniapp/src/admin/AdminUsersPage.tsx:95-103; app/services/generation.py:464-475; app/api/routes/admin_access.py
+
+Основание и степень подтверждения: UI передаёт null для очищенного requests_per_day/token_limit, а service отбрасывает None, сохраняя старое значение. Права передаются в генерацию snapshot-ом; ban/revoke/suspend не останавливают уже запущенные задачи. В UI при suspend обещано, что генерации будут остановлены. На новых incoming updates доступ проверяется — это не полный обход ban.
+
+Исправление: Различать unset и explicit null, добавить bounds числовых полей. Определить и реализовать policy немедленного revoke: отменять задачи пользователя и перепроверять права перед новым внешним вызовом/side effect.
+
+Тест приёмки: Установить лимит → очистить → прочитать null и проверить unlimited. Во время заблокированного stream/tool отозвать grant: новые операции не стартуют, состояние корректно финализируется.
+
+
+A27 [P2] Capability probe неполон и не управляет runtime capabilities
+
+Файлы: scripts/smoke_providers.py:69-70; scripts/smoke_providers.py:210-235; scripts/smoke_providers.py:603-697; app/llm/registry.py; .agents/reports/probe_20260918_130436.json
+
+Основание и степень подтверждения: В списках probe нет gemini-3.7-flash и qwen3.8-max. Оба сохранённых JSON проверяют четыре Alibaba-модели, Gemini отмечен skipped. Результаты записываются в JSON/рекомендации stdout, но runtime cache/provider_health и обновление UI не подключены. Thinking check способен вернуть accepted без обязательных TextDelta/Done; exit code всегда 0. _collect probe читает поток до конца, в отличие от production _consume, поэтому probe не ловит A06.
+
+Исправление: Перебирать registry без пропусков, минимально проверять текст/stream/tool loop/image/thinking/structured output, различать accepted parameter и реально подтверждённое поведение. Хранить versioned результаты по endpoint/credential/model с timestamp/TTL; до подтверждения безопасный provider-default. Добавить режим --strict с ненулевым кодом ошибки и дешёвые явные live flags.
+
+Тест приёмки: Отчёт охватывает минимум 10 baseline-моделей: 9 пользовательских (включая новую deepseek-v4-pro) и 1 внутреннюю; дополнительные модели текущего checkout тоже не пропускать. Internal model отдельно помечена. Изменение результата probe меняет API capabilities/UI. Реальные вызовы выключены по умолчанию; no-key/skip не считается pass. Ни один ключ не появляется в логах/JSON/аргументах процесса.
+
+
+A28 [P2] Полная административная панель из ТЗ не реализована
+
+Файлы: miniapp/src/admin/AdminLayout.tsx; miniapp/src/admin/AdminProvidersPage.tsx; miniapp/src/admin/AdminGeminiPage.tsx; app/api/routes/admin_providers.py; app/api/routes/admin_gemini.py; app/api/app.py:46-60
+
+Основание и степень подтверждения: В панели есть реальные Users, Gemini Pool, Providers, Search, System, Audit и краткий Dashboard, но нет полноценного Models CRUD/enable/capabilities, Alibaba Run Smoke Test и model health. Для Gemini нет требуемых Test project, Reset Local Counters и просмотра фактических minute/day counters. Provider health runtime storage из ТЗ отсутствует. Admin Memory и полноценная диагностика generation errors также не доведены.
+
+Исправление: Реализовать недостающие API+UI вертикальными сценариями, с owner guard, audit, masked secrets, реальным effect и безопасными лимитами smoke tests. Не добавлять фиктивные кнопки, которые только меняют JSON/показывают success.
+
+Тест приёмки: Матрица каждого обязательного admin action: UI → API → DB/runtime effect → audit entry → reload. Тесты non-owner 403, ключ никогда не возвращается полностью, endpoint Alibaba остаётся read-only.
+
+
+A29 [P2] Импорт Gemini keys ошибочно считает последние четыре символа идентификатором ключа
+
+Файлы: app/api/routes/admin_gemini.py:107-148; scripts/import_gemini_keys.py:64-91; app/db/models/gemini.py
+
+Основание и степень подтверждения: Bulk API дедуплицирует key_hint=api_key[-4:]. Разные реальные ключи с одинаковым суффиксом будут ошибочно пропущены. Отдельные add/CLI пути могут добавить одинаковый ключ под разными именами, создавая фиктивно разные quota buckets. Google project identity отдельно не проверяется.
+
+Исправление: Использовать стабильный keyed fingerprint полного ключа для dedup, не раскрывая ключ, и хранить явную identity проекта. Согласовать API/CLI импорт, idempotency и понятные причины пропуска. Не считать шифротекст или masked suffix уникальной identity.
+
+Тест приёмки: Два разных ключа с одним suffix импортируются; повтор того же ключа не создаёт вторую запись; одинаковый Google project не обходит quota policy. Dry run не пишет БД, логи не содержат секретов.
+
+
+A30 [P2] HTTP clients поиска и провайдеров не имеют управляемого lifecycle
+
+Файлы: app/search/manager.py:106-128; app/search/manager.py:194-207; app/search/serper.py; app/search/brave.py; app/search/jina.py; app/services/llm_factory.py:37-63; app/main.py:118-121
+
+Основание и степень подтверждения: SearchManager создаёт backend instances с httpx clients при каждом search/health check; закрытия всех созданных клиентов нет. В factory Alibaba-клиенты кешируются по секретному ключу без eviction/close, Gemini client также не закрывается в main finally. Закрываются только bot session и DB engine.
+
+Исправление: Приложение/lifespan должно владеть singleton или bounded cached clients; конфигурация меняется через replace+aclose. Закрывать все созданные backend instances, в том числе неиспользованные при fallback и health check.
+
+Тест приёмки: Многократные search/test/key rotation не оставляют открытых клиентов. Shutdown закрывает каждый transport ровно один раз; тесты проверяют counters закрытия и отмену активных запросов.
+
+
+A31 [P2] JinaReader реализован, но не подключён к open_url в рабочем пути
+
+Файлы: app/search/jina.py; app/search/fetcher.py:125-148; app/llm/tools/registry.py; app/llm/tools/builtin.py:165-178; app/services/generation.py:464-471
+
+Основание и степень подтверждения: fetch_url умеет принимать reader, ToolContext имеет jina_reader, builtin передаёт context.jina_reader. Но создающий ToolContext GenerationService не передаёт reader; default остаётся None. Наличие настроенного Jina Search не создаёт Reader автоматически.
+
+Исправление: Явно внедрить настроенный JinaReader через service factory/ToolContext, разделить search и reader capabilities/ключи/enablement. Сохранить direct fallback и SSRF/bytes checks, не доверять содержимому Reader.
+
+Тест приёмки: Через настоящий tool loop open_url использует enabled Reader; сбой/отключение переключает на direct extraction. SSRF проверки не обходятся обоими путями.
+
+
+A32 [P2] Источники и AI Overview не доведены до требуемого end-to-end контракта
+
+Файлы: app/config.py:35; app/services/generation.py:350-382; app/services/generation.py:197-239; app/search/manager.py:130-168; app/search/serpapi_ai_overview.py; app/llm/tools/builtin.py:131-146
+
+Основание и степень подтверждения: show_sources=False по умолчанию отключает гарантированное добавление источников в final. Модель может сама сослаться на URL, но обязательность этого не обеспечена. AUTO для вопросительных запросов сначала идёт в AI Overview вместо ordinary search. AIO sections/reference mapping сводятся к тексту и списку, возможен overview без полноценных references; предупреждение модели уже есть, но этого недостаточно для проверки итогового ответа.
+
+Исправление: Сохранять структурированные source references до final renderer; гарантировать корректные clickable citations при реально использованном поиске без выдуманных URL. AUTO: обычный поиск первым, AIO по обоснованной необходимости. Overview без references считать неподтверждённым/недоступным.
+
+Тест приёмки: Search → tool result → final Telegram во всех tiers содержит реальные источники. AIO sections/references сохраняются, отсутствие references не даёт «подтверждённый ответ». Проверить порядок и bounded fallback, без полного dump результатов.
+
+
+A33 [P2] Некорректная структура ответа search backend обрывает fallback
+
+Файлы: app/search/serper.py:50-73; app/search/brave.py:55-78; app/search/manager.py:170-192; app/search/playwright_google.py
+
+Основание и степень подтверждения: Парсеры предполагают dict у элементов результатов и вызывают .get без полной проверки структуры. Валидный JSON с неверным типом может дать AttributeError/TypeError вместо SearchBackendError; manager ловит только SearchBackendError и не переходит к следующему backend. Для experimental Playwright abort при challenge есть, но полноценный persistent cooldown не реализован.
+
+Исправление: Валидировать входящие JSON schemas/типы, переводить ожидаемые protocol errors в единую типизированную ошибку backend. Отдельно управлять cooldown/health; не добавлять CAPTCHA bypass или stealth.
+
+Тест приёмки: Fixtures с null/list/string вместо result object, malformed nested fields, 429/5xx/timeout: следующий backend вызывается, возвращается нормализованный результат. Challenge Playwright отключает его на bounded cooldown.
+
+
+A34 [P1] После рестарта не восстанавливаются stale runs; pending Telegram updates удаляются
+
+Файлы: app/main.py:110-121; app/services/generation.py:546-593; app/db/repositories/generation_runs.py
+
+Основание и степень подтверждения: В startup нет reconciliation queued/running записей, оставшихся от предыдущего процесса. delete_webhook вызывается с drop_pending_updates=True при каждом старте. Background maintenance tasks создаются без управляемого shutdown/drain; bot и uvicorn объединены gather без явного общего supervisor.
+
+Исправление: Startup recovery со статусом aborted/failed и освобождением reservations; pending updates по умолчанию сохранять, deliberate discard — отдельный явный режим. Общий lifecycle supervisor: stop intake → cancel/drain generation and maintenance → persist → close providers → DB.
+
+Тест приёмки: Kill/restart с активным stream и pending update: run перестаёт быть running, reservation освобождена/сверена, непринятое сообщение не теряется. SIGTERM корректно завершает bot и API, readiness отражает деградацию.
+
+
+A35 [P2] Наблюдаемость и аудит админских операций неполны
+
+Файлы: app/api/routes/admin_stats.py; miniapp/src/admin/AdminDashboardPage.tsx; miniapp/src/admin/AdminAuditPage.tsx; app/api/routes/admin_search.py; app/db/models/generation_run.py; app/observability/logging.py
+
+Основание и степень подтверждения: Есть базовые totals/status/token counts и audit table, но нет полного requests/model, latency/TTFT distribution, error rate/429, usage по Gemini project/tool/search backend и полноценной диагностики error runs. Search health checks меняют состояние без полного audit trail. Audit UI показывает только последние 100 записей без фильтра/пагинации; это ограничение UI, не отсутствие самой таблицы.
+
+Исправление: После исправления ledger добавить per-request/call correlation IDs, latency/TTFT/error metrics, project attempts, tool/search counters; безопасные redacted error details. Все admin mutations и дорогие tests — audit, с pagination/filter и без secret/reasoning payload.
+
+Тест приёмки: Контрольные запросы с известным usage/latency/429 видны в нужных разрезах; counters совпадают с ledger. Каждый admin action имеет actor/target/time/result, non-owner не читает чужие логи.
+
+
+A36 [P1] Тесты не доказывают важные инварианты и местами закрепляют ошибки ТЗ
+
+Файлы: tests/unit/test_generation.py; tests/unit/test_context.py; tests/unit/test_gemini_pool.py; tests/unit/test_api.py; tests/unit/test_alibaba_provider.py; pyproject.toml; miniapp/package.json
+
+Основание и степень подтверждения: 18 test modules, 290 test-function definitions. 285 доступных parametrized unit cases здесь прошли; четыре модуля не собрались без aiogram. Нет полноценного PostgreSQL/API+bot/frontend integration suite и CI workflow. Тесты специально ожидают unknown-model fallback, dropping historical images, over-budget recent window и break-on-Done. В pool suite нет настоящего barrier/database race test, несмотря на заявления TASKS.
+
+Исправление: Исправлять не только реализацию, но и неверные тестовые ожидания по исходным требованиям. Добавить offline provider-to-consumer contract suite, PostgreSQL transactional tests, frontend E2E и Docker smoke. Live API tests отдельно opt-in, без расхода ключей в обычном CI.
+
+Тест приёмки: CI Python 3.12: весь pytest без исключений, Ruff, mypy/pyright; frontend npm ci, tsc, production build, E2E. PostgreSQL fresh+upgrade/race tests реальны, не SQLite вместо PostgreSQL. Приложены команды, exit codes и логи, skip не считается pass.
+
+
+A37 [P2] Deployment требует проверки сигналов, readiness и безопасного сетевого профиля
+
+Файлы: Dockerfile; docker-compose.yml; Caddyfile; app/api/app.py:61-63; app/main.py:118-121; README.md
+
+Основание и степень подтверждения: CMD запускает shell с «alembic upgrade head && python ...» без exec; /health всегда возвращает ok без DB/bot readiness; app port публикуется на всех интерфейсах, позволяя обращаться по HTTP в обход Caddy, если не закрыт firewall. Присутствует специфичный для хостера Telegram IP pin. Полный docker compose build/up здесь не выполнен, поэтому проблемы signal forwarding/профилей отмечены как риски, а не доказанный crash.
+
+Исправление: Entry point с exec после миграций, coordinated shutdown, отдельные liveness/readiness. По умолчанию expose только внутри сети Caddy или bind localhost; документировать external reverse proxy. Вынести Telegram IP pin в explicit deployment override. Проверить compose config с/без Caddy profile, quoted/encoded DB credentials и сохранность volume.
+
+Тест приёмки: docker compose config/build/up на чистой машине и upgrade существующей DB; miniapp dist отдаётся по HTTPS; SIGTERM сохраняет состояния; readiness падает при потере DB/bot. Выполнен backup+restore test. Никакого самовольного изменения endpoint Gemini/Alibaba.
+
+
+A38 [P2] Документация и отметки DONE противоречат коду и собственным probe-отчётам
+
+Файлы: TASKS.md; KNOWN_ISSUES.md; DECISIONS.md; PLAN.md; README.md; docs/API.md; docs/vendor/ALIBABA.md; .agents/reports/security_review.md; .agents/reports/probe_20260918_130436.json
+
+Основание и степень подтверждения: TASKS отмечает milestones готовыми, advisory/race/partial/tool wiring — выполненными, но описанные выше инварианты не обеспечены. KNOWN_ISSUES одновременно говорит о live probe и о том, что probes не выполнялись. Формулировка «все 5 Alibaba models» не подтверждается сохранённым JSON из четырёх моделей; Gemini в обоих JSON skipped. Конец TASKS повторно содержит unchecked memory tasks после DONE. DTL в probe подтверждён, но ADR/backlog остались старые.
+
+Исправление: Обновить docs после исправлений и привязать DONE к конкретным commit/artifact/test results. Отдельно хранить исторические probe results и актуальный статус. Не заявлять, что Kimi не проводил исследования: отчёты есть; важно устранить рассогласование результатов и runtime.
+
+Тест приёмки: Для каждого audit ID — fix/test/status/evidence. Документация не утверждает live-tested то, что skipped; известные риски явно остаются открытыми, optional features не выдаются за обязательные реализованные.
+
+
+A39 [P2] Tool-loop теряет часть assistant turn и недостаточно ограничен по общей работе
+
+Файлы: app/services/generation.py:430-494; app/services/generation.py:506-544; app/llm/tools/runner.py; app/llm/tools/registry.py; app/llm/base.py
+
+Основание и степень подтверждения: _assistant_tool_message получает только ToolCall list и не включает текст assistant, пришедший в том же раунде. Следующий provider request не видит уже сказанный им текст. Ограничены iterations и timeout отдельного tool, но нет общего deadline, лимита количества calls в одном batch и общего result/token budget. Сохранение provider-specific reasoning protocol для Alibaba требует отдельного end-to-end подтверждения; факта live incompatibility здесь не установлено. Gemini thought signatures для function calls уже сохраняются — это не отсутствующая функция.
+
+Исправление: Сохранять полный нормализованный assistant turn (visible text + calls + необходимые private protocol metadata внутри adapter), не показывая reasoning пользователю. Добавить max calls/round, max calls/run, overall deadline/result budget и явный статус max-iterations. Не отключать Gemini thought signatures при рефакторинге.
+
+Тест приёмки: Два и более tool-раунда: следующий payload содержит правильный предыдущий turn и tool results. Текст не повторяется из-за утраты контекста, лимиты batch/deadline выполняются; reasoning отсутствует в Telegram и обычных messages.
+
+
+A40 [P3] Рекомендуемое усиление памяти, ограничений входа и воспроизводимости
+
+Файлы: app/db/repositories/memories.py:87-104; app/db/migrations/versions/0006_memories.py; app/memory/deduplicator.py; app/config.py; pyproject.toml; miniapp/src/components/Modal.tsx; miniapp/src/components/Toggle.tsx
+
+Основание и степень подтверждения: Это отдельный блок улучшений, не заявление о доказанной эксплуатации. FTS строит to_tsvector на чтении без соответствующего GIN index и ранжирует в основном importance/last_used; dedup не имеет DB unique fingerprint для конкурентных вставок. Backend dependencies не имеют полного lockfile; runtime numeric/URL settings требуют более строгой валидации. UI modal/toggles нуждаются в проверке focus/labels и Telegram mobile ergonomics.
+
+Исправление: GIN/FTS ranking и bounded dedup candidates после измерения EXPLAIN; атомарный user-scoped fingerprint для exact dedup. Зафиксировать backend dependencies/образа и добавить dependency scanning без неподтверждённых CVE-обвинений. Ограничить длины input/schema/tool args, проверить URL/числовые ranges, ввести accessibility smoke tests и backup retention policy.
+
+Тест приёмки: Планы запросов и latency на реалистичном объёме, concurrent memory inserts без exact duplicates, чистая установка одинаковых версий, отрицательные config tests, keyboard/focus/screen-reader smoke. Эти улучшения не должны задерживать исправление P1.
+
+
+ОБЩИЕ КРИТЕРИИ ПРИЁМКИ — ОБЯЗАТЕЛЬНЫ
+
+1. Полный pytest проходит в поддерживаемом окружении, без скрытого исключения test_generation/test_draft_streamer и без пропуска нужных функций из-за missing dependencies. Ruff, mypy, frontend typecheck и build проходят. Обычный CI не обращается к платным/квотируемым API.
+2. Offline provider-contract tests моделируют точный порядок chunk/text/finish/usage/[DONE], tool calls, malformed chunks, неожиданный EOF, cancel и finalization. Done ровно один и не прячет финальное usage. Известные usage разных раундов/попыток не теряются и не дублируются; unknown usage помечается unknown, а не выдумывается равным нулю.
+3. PostgreSQL tests используют реальную БД и независимые сессии; barrier заставляет одновременные запросы пересекаться. Проверить one-active-chat, max-concurrent-user, RPM/RPD/TPM reservations, minute/day boundary, idempotent reconcile, crash/restart recovery. In-memory mock lock не считается доказательством межпроцессной защиты.
+4. Удаление/архивация/переключение чата не сбрасывает дневные лимиты и не смешивает историю. Приватное содержимое чата может удаляться, минимальный несекретный usage ledger должен сохраняться по явной retention policy. Миграция не восстанавливает несуществующий исторический расход фиктивными числами.
+5. UUID-based E2E: owner авторизуется, приглашает пользователя, выдаёт/снимает модели, меняет ограничения, снимает числовой лимит, включает/выключает provider, сохраняет settings и проверяет фактический следующий LLMRequest. Пустой список моделей запрещает все модели, explicit all разрешает все. Старый is_owner у другого ID не даёт admin.
+6. Chat E2E: новый чат, text, photo, follow-up по старому фото, сохранённый prompt override, current chat, архив/restore, пагинация >50, отсутствующий/disabled model → явная ошибка без fallback.
+7. Context tests: summary coverage boundary строго согласована; вся непокрытая релевантная история представлена или применяется явная безопасная стратегия. Current/system/tools/images/results/output/margin учитываются перед каждым request. Пустой/невалидный summary не продвигает covered_until. Две фоновые compaction не откатывают/не перезаписывают более новую границу.
+8. Stop во время зависшего сетевого чтения и долгого tool завершается за небольшой проверяемый deadline, например не более 2 секунд в детерминированном тесте; не ждёт provider read timeout. Никаких новых side effects после подтверждённой отмены. Partial сохраняется без потери начала/хвоста, run cancelled и usage/finalizers завершаются идемпотентно.
+9. Telegram renderer: raw '<div>', '&', код, длинный текст, emoji/Unicode, разные rich/plain tiers, not-modified edit и RetryAfter. Финальный текст не молча обрезается, не превышает лимиты, не дублируется.
+10. SSRF: direct IP, DNS A/AAAA, mixed answers, redirect chains, rebinding между validation/connect, timeouts, streaming max bytes/decompression. Проверить реальный адрес соединения; TLS verification остаётся включённым. Поисковые результаты — недоверенные данные, не system instructions.
+11. Tool policy едина для advertised tools и executor. Memory Off/Web Off/permissions/cancellation запрещают side effects даже при сфабрикованном необъявленном ToolCall. Учитываются общие deadline/call/result/token limits.
+12. Capability probe охватывает ВСЕ обязательные модели, но не делает 30 дорогостоящих запросов при каждом startup. Результаты с timestamp/TTL/endpoint/model версионируются и влияют на registry/API/UI. Live integration tests запускаются только явными RUN_GEMINI_INTEGRATION/RUN_ALIBABA_INTEGRATION/RUN_SEARCH_INTEGRATION либо столь же явными flags. Не просить секреты в чате и не возвращать frontend полный сохранённый ключ.
+13. Пустая БД: upgrade head, restart/idempotence; существующая БД: безопасная миграция и rollback/backup strategy. Docker multi-stage build и compose config/up работают в заявленных профилях, /ready проверяет зависимости, SIGTERM корректно завершает bot/api/generation/providers. Port/exposure соответствует HTTPS Mini App.
+14. Восстановление из backup проверено либо честно отмечено непроверенным. Данные, которые старый код не сохранял (например file_id), не выдумывать. Составить описание деградации старых записей.
+
+ОБЯЗАТЕЛЬНЫЙ ОТЧЁТ ПОСЛЕ РАБОТЫ
+Верни таблицу A01–A40: исправлено / уже было исправлено с доказательством / остаётся риск / не реализовано, затем changed files, commit ID, regression test, точный результат. Приложи команды и реальные логи pytest/Ruff/mypy/npm typecheck/build/PostgreSQL/Docker, объясни каждый skip. Отдельно укажи какие live endpoint/model combinations проверены, когда и чем, а какие не проверены. Обнови TASKS, KNOWN_ISSUES, DECISIONS, README только после проверки; нельзя ставить DONE на основании наличия файла, кнопки или ложного smoke-test success.
+
+Не останавливайся после общего плана. Реализуй исправления в доступной среде. Если недоступны секреты/сеть/PostgreSQL/Docker, выполни весь доступный код и offline tests, предоставь команды для оставшегося и явно перечисли непроверенные части. Нельзя выдавать их за завершённые.
+
+==================================================
+ДОПОЛНИТЕЛЬНАЯ ПРИЁМКА И СДАЧА V2
+==================================================
+
+# Дополнительная приёмка версии 2
+
+Дополняет все A01–A40 и общие критерии в `KIMI_FIX_PROMPT.txt`.
+Это план будущих проверок. Ни один пункт здесь не помечен уже пройденным.
+
+## N01 — доказательство делегирования
+
+Фактические child sessions / task calls указаны в `.agents/POLYRA_FIX_V2_DISPATCH.md`.
+Названия ролей в тексте без реального запуска не считаются выполнением.
+Есть параллельная работа независимых задач, когда среда её поддерживает; максимум
+четыре активных child agents, без рекурсивного размножения. При реальной блокировке
+статус blocked и причина, а не выдуманные session IDs или результаты.
+
+Есть file ownership, общий integration contract, отчёты исполнителей и review их diff.
+В shared worktree отсутствуют параллельные правки одного файла и конкурентные git
+checkout/commit/reset. Отдельные worktrees — только по явному назначению координатора;
+создание child session само по себе НЕ гарантирует отдельный worktree.
+
+## N02 — Desktop/runtime
+
+Указаны реально обнаруженные версия/ветка (или честное unknown), tool name и агент,
+который делегирует. Применён совместимый локальный формат без удаления пользовательских
+настроек, смены provider/key/model, повышения всех разрешений или установки чужого runtime.
+Профили действительно обнаружены, либо используется штатный subagent с тем же scope.
+Сам факт копирования восьми Markdown-файлов ещё не доказывает запуск.
+
+## N03 — матрица регрессий всех моделей
+
+`MODEL_REGRESSION_MATRIX.md` — шаблон; перед сдачей заполнить на текущем commit.
+Проверять минимум 10 baseline ID с новой Pro; внутреннюю модель — отдельно.
+Существующие модели/настройки/разрешения не удалены «ради исправления».
+Любые более новые пользовательские модели из текущего checkout также сохранены.
+
+Обязательные offline сценарии:
+- нормальный text stream и явное завершение;
+- reasoning не появляется в Telegram/UI/обычных message bodies;
+- usage trailer после finish не теряется, tool-round usage суммируется;
+- 400 не превращается в перебор модели/ключей; auth и temporary errors различаются;
+- 429, Retry-After, 5xx, timeout, оборванный SSE, malformed frame и fragmented tools;
+- partial -> ошибка без дублирования ответа/side effects;
+- cancel во время ожидания сети и tools; finalizers завершаются корректно;
+- transient probe failure не выключает модель и не стирает positive capability;
+- parameter accepted не выдаётся за самостоятельную семантику режима;
+- admin-disabled credential не оживает через env fallback;
+- точный model ID не меняется при retry, rotation и ошибке;
+- inherited/effective model/thinking/prompt доходят до фактического LLMRequest.
+
+Различать capability states supported/unsupported/unknown и состояние transport health.
+Пропуск, no-key, limited-budget и timeout не эквивалентны unsupported.
+Старый успешный probe хранится с timestamp/TTL и stale-marker, не как вечная гарантия.
+
+Небольшой повторный opt-in smoke batch (число повторов и общий бюджет явно ограничены)
+нужен для наблюдения нестабильности; не запускать тысячи запросов, не обещать SLA
+по трём успешным ответам, не тратить quota всех 30 Gemini-проектов автоматически.
+
+## N04 — DeepSeek V4 Pro
+
+Регистрация:
+- exact ID `deepseek-v4-pro`, provider alibaba, internal_only false;
+- `deepseek-v4.1-flash` остаётся отдельной моделью;
+- Pro не получает чужой image flag;
+- исходный Alibaba endpoint и direct transport сохранены;
+- Pro не меняет выбранную пользователем default-модель.
+
+Payload/UI:
+- DEFAULT не эквивалентен OFF;
+- OFF/HIGH/MAX имеют ожидаемый payload и честный статус подтверждения;
+- LOW не представлен как новый уровень на основании accepted alias;
+- специфичные параметры Qwen/GLM/Flash не добавляются по ошибке;
+- лимит output не равен автоматически maximum provider ceiling;
+- поле output budget реально поддерживается выбранным adapter/API.
+
+Вертикальные тесты:
+1. Owner видит Pro и может выбрать/сохранить её.
+2. User с allowlist без Pro получает отказ до внешнего запроса.
+3. User с allowlist [Pro] может использовать Pro, но не Flash.
+4. [] запрещает всё; explicit unrestricted включает новые публичные enabled модели
+   согласно общей политике; добавление Pro не расширяет существующий explicit allowlist.
+5. Reload/API/effective settings сохраняют exact ID и допустимый thinking.
+6. Pro final stream и usage сохраняются раздельно от Flash; несколько tool rounds
+   корректно сериализованы и учитываются.
+7. Фото на Pro вызывает понятную ошибку; нет потери файла и cross-model fallback.
+8. Ошибка/Stop не создаёт completed run и не выдаёт hidden reasoning.
+
+## Что сдавать
+
+`FIX_REPORT_V2.md`:
+- таблица A01–A40 и N01–N04;
+- status: fixed / already-fixed-and-verified / open / blocked / optional-deferred;
+- изменённые файлы, commit или идентификатор diff, test name, command, exit code,
+  evidence artifact, ограничения;
+- полные итоговые логи отдельно от старых `audit_original/evidence/`;
+- реальный список делегирований и результаты integration review;
+- отдельные offline и live статусы каждой модели и сценария.
+
+Skipped не является passed. `fixed` по коду не тождественно `live-verified`.
+A40 можно оставить optional-deferred с обоснованием; P1/P2 и N04 так не закрывать.
+Если runtime/сеть/ключи/БД недоступны, выполнить доступную реализацию и tests,
+перечислить blockers и команды для непроверенного, не заявляя полного завершения.
+
+Работай до проверяемого результата в доступной среде, не запрашивая подтверждения
+каждого безопасного локального изменения. Реальные permission prompts и необратимые
+операции не обходить. Если часть среды недоступна, выполни доступное, зафиксируй
+blockers и не называй неисполненные проверки завершёнными.

@@ -263,7 +263,11 @@ class DraftStreamer:
             )
             self._mark_flushed()
         except TelegramBadRequest as exc:
-            logger.info("rich draft rejected (%s), downgrade to message draft", exc)
+            logger.info(
+                "rich draft rejected (%s), downgrade to message draft; snippet=%r",
+                exc,
+                markdown[:160],
+            )
             self._tier = 2
             await self._flush_plain_draft()
         except TelegramRetryAfter as exc:
