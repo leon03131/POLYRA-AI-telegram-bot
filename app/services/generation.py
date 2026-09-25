@@ -119,11 +119,15 @@ class GenerationRegistry:
         return count
 
     async def stop(self, tg_chat_id: int, draft_id: int) -> bool:
-        """Запросить отмену (выставить cancellation); True, если генерация найдена."""
+        """Отмена: cancellation event + немедленный task.cancel (A11).
+
+        task.cancel прерывает даже зависшее чтение HTTP — CancelledError
+        ловится в _consume, partial сохраняется, run → cancelled."""
         gen = self.find_by_draft(tg_chat_id, draft_id)
         if gen is None:
             return False
         gen.cancellation.set()
+        gen.task.cancel()
         return True
 
 

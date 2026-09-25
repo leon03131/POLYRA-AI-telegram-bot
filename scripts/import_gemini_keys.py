@@ -73,16 +73,34 @@ async def import_keys(keys: list[str], *, name_prefix: str, dry_run: bool) -> in
     crypto = CryptoBox(settings.master_encryption_key)
     engine = create_engine_from_url(settings.database_url)
     session_factory = make_session_factory(engine)
+    added = 0
     try:
         async with session_factory() as session:
             repo = GeminiProjectRepository(session)
+            # A29: дедуп по полному ключу (decrypt существующих), не по last4-маске.
+            existing_keys: set[str] = set()
+            for project in await repo.list_all():
+                try:
+                    existing_keys.add(crypto.decrypt(project.encrypted_api_key))
+                except ValueError:
+                    continue
+            existing_names = {project.name for project in await repo.list_all()}
             for name, key in zip(names, keys, strict=True):
+                if key in existing_keys:
+                    logger.info("пропуск дубля ключа %s", mask_secret(key))
+                    continue
+                if name in existing_names:
+                    logger.info("пропуск: имя %s занято", name)
+                    continue
                 await repo.add(name, crypto.encrypt(key), key_hint=key[-4:])
+                existing_keys.add(key)
+                existing_names.add(name)
+                added += 1
                 logger.info("добавлен проект %s (%s)", name, mask_secret(key))
             await session.commit()
     finally:
         await engine.dispose()
-    return len(keys)
+    return added
 
 
 def main(argv: list[str] | None = None) -> int:

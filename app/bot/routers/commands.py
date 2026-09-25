@@ -159,7 +159,8 @@ async def cmd_settings(message: Message, settings: Settings) -> None:
 
 @router.message(Command("admin"))
 async def cmd_admin(message: Message, user: User, settings: Settings) -> None:
-    if not user.is_owner:
+    # A04: owner identity — ТОЛЬКО numeric telegram id (флаг БД не даёт прав).
+    if message.from_user is None or message.from_user.id != settings.owner_telegram_id:
         await message.answer("⛔ Только для владельца.")
         return
     await message.answer(

@@ -124,17 +124,34 @@ async def list_projects(current: OwnerDep, session: SessionDep) -> dict[str, Any
     return {"projects": [_project_out(project) for project in projects]}
 
 
+def _existing_plaintext_keys(projects: list[Any], crypto: CryptoBox) -> set[str]:
+    """A29: дедуп по ПОЛНОМУ ключу (decrypt существующих), не по last4-маске.
+
+    key_hint — только UI-маска; два разных ключа с одним suffix обязаны
+    импортироваться, а одинаковый ключ — пропускаться."""
+    keys: set[str] = set()
+    for project in projects:
+        try:
+            keys.add(crypto.decrypt(project.encrypted_api_key))
+        except ValueError:
+            continue  # повреждённая запись не мешает дедупу
+    return keys
+
+
 @router.post("/projects", status_code=201)
 async def add_project(
     body: GeminiProjectCreateRequest, request: Request, current: OwnerDep, session: SessionDep
 ) -> dict[str, Any]:
-    """Добавить проект (ключ шифруется Fernet); дубль имени → 409."""
+    """Добавить проект (ключ шифруется Fernet); дубль имени или ключа → 409."""
     actor, _ = current
     crypto: CryptoBox = request.app.state.crypto
     repo = GeminiProjectRepository(session)
+    existing = await repo.list_all()
     name = body.name.strip()
-    if any(project.name == name for project in await repo.list_all()):
+    if any(project.name == name for project in existing):
         raise HTTPException(status_code=409, detail="project name already exists")
+    if body.api_key in _existing_plaintext_keys(existing, crypto):
+        raise HTTPException(status_code=409, detail="api key already exists in pool")
     project = await repo.add(name, crypto.encrypt(body.api_key), key_hint=body.api_key[-4:])
     await admin_service.audit(
         session,
@@ -160,7 +177,7 @@ async def bulk_add_projects(
     crypto: CryptoBox = request.app.state.crypto
     repo = GeminiProjectRepository(session)
     existing = await repo.list_all()
-    existing_hints = {project.key_hint for project in existing}
+    existing_keys = _existing_plaintext_keys(existing, crypto)  # полный ключ, не mask (A29)
     existing_names = {project.name for project in existing}
 
     name_pattern = re.compile(rf"^{re.escape(body.name_prefix)}-(\d+)$")
@@ -178,7 +195,7 @@ async def bulk_add_projects(
             skipped += 1
             continue
         key_hint = api_key[-4:]
-        if key_hint in existing_hints:
+        if api_key in existing_keys:
             skipped += 1
             continue
         max_number += 1
@@ -187,7 +204,7 @@ async def bulk_add_projects(
             max_number += 1
             name = f"{body.name_prefix}-{max_number:02d}"
         await repo.add(name, crypto.encrypt(api_key), key_hint=key_hint)
-        existing_hints.add(key_hint)
+        existing_keys.add(api_key)
         existing_names.add(name)
         added += 1
     await admin_service.audit(

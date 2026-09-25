@@ -49,8 +49,15 @@ from app.services.generation import (
 
 
 def _gen(chat_id: uuid.UUID, tg_chat_id: int = 1, draft_id: int = 1) -> ActiveGeneration:
-    task = asyncio.current_task()
-    assert task is not None
+    """ActiveGeneration с фоновой «спящей» задачей (stop() вызывает task.cancel —
+
+    нельзя давать current_task, иначе отменится сам тест)."""
+
+    async def _never() -> None:
+        await asyncio.sleep(3600)
+
+    task = asyncio.get_running_loop().create_task(_never())
+    task.add_done_callback(lambda _t: None)
     return ActiveGeneration(
         task=task,
         cancellation=asyncio.Event(),
