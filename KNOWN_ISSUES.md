@@ -1,6 +1,6 @@
 # KNOWN ISSUES / риски на трекере
 
-## Deployment (2026-09-18, VPS 72.56.252.97)
+## Deployment (2026-09-24, VPS SberCloud 176.108.245.225; старый 72.56.252.97 мёртв)
 
 - **Хостер фильтрует часть api.telegram.org**: 149.154.166.110/175.53/161.20 — DROP,
   149.154.167.220 — работает. Решение: `extra_hosts` pin в docker-compose.yml (app service).
@@ -43,3 +43,14 @@
     автоматически).
 11. **Rate limits Telegram draft updates не документированы** — throttle 1/сек + 429 backoff;
     подобрать эмпирически на живом боте.
+
+## FIX V2 (2026-09-24) — открытые остатки
+
+- PostgreSQL barrier/race integration (A05/A09 формально на живой БД с двумя
+  соединениями) — не прогнан в этой среде; код-инварианты покрыты unit/контрактами.
+- Telegram draft rate limit остаётся эмпирическим (throttle 1/с + retry_after).
+- A40 остатки (optional-deferred): полный lockfile, a11y-тесты Mini App,
+  backup retention policy.
+- Конфликт по источникам: владелец просил выключить блок «Источники» (19.09),
+  V2 A32 требует их при реальном поиске — выбран V2 (default SHOW_SOURCES=1);
+  отключить: SHOW_SOURCES=0 в .env.

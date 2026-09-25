@@ -127,18 +127,15 @@
 - Осталось на владельце: живой запуск с ключами (smoke_providers), `alembic upgrade head`
   против продовой PostgreSQL, BotFather Main Mini App, наблюдение за rate limits драфтов.
 
+## FIX V2 (2026-09-24)  ✅ DONE
+
+См. FIX_REPORT_V2.md (полная таблица A01-A40/N01-N04) и
+.agents/reports/fix-v2/MODEL_REGRESSION_MATRIX.md.
+Итог: 488 тестов зелёные, ruff/mypy clean (155 файлов), live probe Alibaba 39/39
+включая deepseek-v4-pro; деплой на VPS 176.108.245.225 с миграцией 0009.
+
 ## Бэклог (future, не scope)
 
 - audio/video/documents parts; export чатов; pgvector embeddings; webhook режим;
-  Playwright search (experimental); Kimi Dynamic Tool Loading (после probe).
-
-- [ ] memories таблица + миграция 0006 (text/normalized/category/importance/source/embedding?)
-- [ ] memory/extractor.py (3.5-flash-lite MEDIUM, JSON, dedupe)
-- [ ] memory/retriever.py (PostgreSQL FTS fallback; pgvector — optional позже)
-- [ ] memory/deduplicator.py (normalize + near-dup Jaccard)
-- [ ] wiring в generation: retrieval в context, extraction в фоне
-- [ ] tests: extraction, dedup, deletion, disabled memory, изоляция по user_id
-
-## M8..M12
-
-См. PLAN.md §5. Детализация добавляется перед стартом каждого milestone.
+  Playwright search (experimental); Kimi Dynamic Tool Loading (после probe — live
+  подтверждён 24.09, внедрение в AlibabaProvider — отдельная задача).

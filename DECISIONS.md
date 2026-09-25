@@ -85,3 +85,20 @@ max concurrent) enforce'ятся в GenerationService._prepare. open_url кон�
 Web content — untrusted data (prompt-injection safe). open_url: только http/https,
 DNS resolve + SSRF checks после каждого redirect, блок private/loopback/link-local/
 metadata, max bytes, truncation по token budget.
+
+## ADR-017 | 2026-09-24 | accepted (FIX V2)
+- Stream contract: ровно один Done на поток; Usage строго до Done; EOF без Done =
+  NetworkError (не успех); cancel ≠ EOF. Pool финализирует success даже при раннем
+  break потребителя (finally после terminal).
+- Usage ledger: сумма по раундам/попыткам; unknown ≠ 0; cancelled/failed сохраняют
+  известное. generation_runs переживают удаление чата (SET NULL) + partial unique
+  index «одна активная генерация на чат».
+- Tools policy: effective set = grant ∩ web-off ∩ memory-off ∩ title; один и тот же
+  набор в LLMRequest и ToolRunner.allowed_tool_names.
+- Owner identity: ТОЛЬКО numeric telegram_user_id; флаг is_owner не даёт прав.
+- Model access: user_model_access.mode (all|list); пустой list = запрет всех.
+- Gemini keys: дедуп по полному ключу (decrypt+compare), key_hint — только UI.
+- SSRF: pinned-IP connect (Host+SNI реального хоста, TLS verify включён).
+- Settings: system_settings из БД читаются на каждый запрос (DB поверх env).
+- Sources: показываются при реальном поиске (default SHOW_SOURCES=1; см. конфликт
+  с просьбой владельца от 19.09 — выбран V2; отключается env).
