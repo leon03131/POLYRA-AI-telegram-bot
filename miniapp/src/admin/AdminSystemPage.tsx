@@ -134,6 +134,17 @@ export function AdminSystemPage() {
             onChange={(e) => set("memory_retrieval_limit", Number(e.target.value))}
           />
         </div>
+        <div className="form-row">
+          <label className="form-label">
+            Мин. объём сообщения для извлечения памяти (memory_extraction_min_chars)
+          </label>
+          <Input
+            type="number"
+            min={1}
+            value={form.memory_extraction_min_chars}
+            onChange={(e) => set("memory_extraction_min_chars", Number(e.target.value))}
+          />
+        </div>
       </Section>
 
       {save.error && <div className="error-text">{errorMessage(save.error)}</div>}

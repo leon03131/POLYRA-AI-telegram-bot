@@ -30,11 +30,13 @@ from httpx import ASGITransport, AsyncClient
 
 from app.api import create_app
 from app.api.dependencies import get_current_user, get_db_session
+from app.api.routes import admin_system as admin_system_routes
 from app.api.routes import me as me_routes
 from app.config import Settings
 from app.db.models import User
 from app.llm.registry import default_registry
 from app.security.crypto import CryptoBox
+from app.services import admin as admin_service
 from app.services import credentials as credentials_service
 from app.services import settings as settings_service
 from app.services.access import GrantView, evaluate_access
@@ -647,3 +649,120 @@ async def test_effective_settings_empty_store_returns_env_defaults(
         memory_retrieval_limit=env.memory_retrieval_limit,
         memory_extraction_min_chars=env.memory_extraction_min_chars,
     )
+
+
+# --- A13: admin system API экспонирует memory_extraction_min_chars ----------------
+
+
+class _FakeApiSession:
+    """Сессия-заглушка для admin-роутов без БД: commit — no-op."""
+
+    async def commit(self) -> None:
+        return None
+
+
+async def _fake_audit(session: Any, **kwargs: Any) -> None:
+    """No-op подмена admin_service.audit (PUT /api/admin/system пишет audit_log)."""
+    return None
+
+
+class _FakeAdminSystemRepository:
+    """Подмена SystemSettingRepository в admin_system: get_many/set_value над dict."""
+
+    def __init__(self, session: Any, stored: dict[str, Any]) -> None:
+        self._stored = stored
+
+    async def get_many(self, keys: Any) -> dict[str, Any]:
+        return {key: value for key, value in self._stored.items() if key in set(keys)}
+
+    async def set_value(self, key: str, value: Any) -> None:
+        self._stored[key] = value
+
+
+def _override_admin_system(
+    monkeypatch: pytest.MonkeyPatch, app: FastAPI, stored: dict[str, Any]
+) -> None:
+    """Подменить DB-сессию, репозиторий system_settings и audit для /api/admin/system."""
+
+    async def _fake_session() -> Any:
+        yield _FakeApiSession()
+
+    app.dependency_overrides[get_db_session] = _fake_session
+    monkeypatch.setattr(
+        admin_system_routes,
+        "SystemSettingRepository",
+        lambda session: _FakeAdminSystemRepository(session, stored),
+    )
+    monkeypatch.setattr(admin_service, "audit", _fake_audit)
+
+
+async def test_admin_system_get_without_stored_returns_env_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A13: GET /api/admin/system без записи → env-дефолт memory_extraction_min_chars."""
+    app = _make_app()
+    _override_user(app, is_owner=True)
+    _override_admin_system(monkeypatch, app, {})
+    async with _client(app) as client:
+        response = await client.get("/api/admin/system")
+    assert response.status_code == 200
+    assert response.json()["memory_extraction_min_chars"] == (
+        _service_settings().memory_extraction_min_chars
+    )
+
+
+async def test_admin_system_put_memory_extraction_min_chars_roundtrip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A13: PUT валидного значения → сохраняется и отражается в последующем GET."""
+    app = _make_app()
+    _override_user(app, is_owner=True)
+    stored: dict[str, Any] = {}
+    _override_admin_system(monkeypatch, app, stored)
+    async with _client(app) as client:
+        put = await client.put("/api/admin/system", json={"memory_extraction_min_chars": 300})
+        assert put.status_code == 200
+        assert put.json() == {"ok": True}
+        response = await client.get("/api/admin/system")
+    assert response.status_code == 200
+    assert response.json()["memory_extraction_min_chars"] == 300
+    assert stored == {"memory_extraction_min_chars": 300}
+
+
+@pytest.mark.parametrize("value", [0, -5])
+async def test_admin_system_put_memory_extraction_min_chars_not_positive_400(
+    monkeypatch: pytest.MonkeyPatch, value: int
+) -> None:
+    """A13: PUT значения <= 0 → 400; в store ничего не записывается."""
+    app = _make_app()
+    _override_user(app, is_owner=True)
+    stored: dict[str, Any] = {}
+    _override_admin_system(monkeypatch, app, stored)
+    async with _client(app) as client:
+        response = await client.put(
+            "/api/admin/system", json={"memory_extraction_min_chars": value}
+        )
+    assert response.status_code == 400
+    assert "must be positive" in response.json()["detail"]
+    assert stored == {}
+
+
+# --- A26: bounds-валидация grant_access → HTTP 400, не 500 -----------------------
+
+
+async def test_admin_grant_access_not_positive_limit_400() -> None:
+    """A26: POST /api/admin/access/grant с requests_per_day=-5 → 400 («must be positive»)."""
+    app = _make_app()
+    _override_user(app, is_owner=True)
+
+    async def _fake_session() -> Any:
+        yield _FakeApiSession()
+
+    app.dependency_overrides[get_db_session] = _fake_session
+    async with _client(app) as client:
+        response = await client.post(
+            "/api/admin/access/grant",
+            json={"telegram_user_id": 111, "requests_per_day": -5},
+        )
+    assert response.status_code == 400
+    assert "must be positive" in response.json()["detail"]

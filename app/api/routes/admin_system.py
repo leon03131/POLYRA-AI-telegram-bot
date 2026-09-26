@@ -20,6 +20,7 @@ _KEY_MAX_TOOL_ITERATIONS = "max_tool_iterations"
 _KEY_CONTEXT_KEEP_RECENT = "context_keep_recent"
 _KEY_CONTEXT_TRIGGER_RATIO = "context_trigger_ratio"
 _KEY_MEMORY_RETRIEVAL_LIMIT = "memory_retrieval_limit"
+_KEY_MEMORY_EXTRACTION_MIN_CHARS = "memory_extraction_min_chars"
 
 _ALL_KEYS = (
     _KEY_DEFAULT_MODEL,
@@ -29,10 +30,16 @@ _ALL_KEYS = (
     _KEY_CONTEXT_KEEP_RECENT,
     _KEY_CONTEXT_TRIGGER_RATIO,
     _KEY_MEMORY_RETRIEVAL_LIMIT,
+    _KEY_MEMORY_EXTRACTION_MIN_CHARS,
 )
 
 _INT_KEYS = frozenset(
-    {_KEY_MAX_TOOL_ITERATIONS, _KEY_CONTEXT_KEEP_RECENT, _KEY_MEMORY_RETRIEVAL_LIMIT}
+    {
+        _KEY_MAX_TOOL_ITERATIONS,
+        _KEY_CONTEXT_KEEP_RECENT,
+        _KEY_MEMORY_RETRIEVAL_LIMIT,
+        _KEY_MEMORY_EXTRACTION_MIN_CHARS,
+    }
 )
 
 
@@ -46,6 +53,7 @@ class SystemPutRequest(BaseModel):
     context_keep_recent: int | None = None
     context_trigger_ratio: float | None = None
     memory_retrieval_limit: int | None = None
+    memory_extraction_min_chars: int | None = None
 
 
 def _system_out(stored: dict[str, Any], settings: Settings) -> dict[str, Any]:
@@ -66,6 +74,11 @@ def _system_out(stored: dict[str, Any], settings: Settings) -> dict[str, Any]:
         ),
         _KEY_MEMORY_RETRIEVAL_LIMIT: stored.get(
             _KEY_MEMORY_RETRIEVAL_LIMIT, settings.memory_retrieval_limit
+        ),
+        # A13: ключ читается effective-сервисом и пробрасывается в extractor —
+        # экспонируем в admin API, чтобы владелец мог менять значение из UI.
+        _KEY_MEMORY_EXTRACTION_MIN_CHARS: stored.get(
+            _KEY_MEMORY_EXTRACTION_MIN_CHARS, settings.memory_extraction_min_chars
         ),
     }
 

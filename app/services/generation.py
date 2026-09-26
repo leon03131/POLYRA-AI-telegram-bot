@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot.streaming.draft import MESSAGE_LIMIT, DraftStreamer, _split_text, new_draft_id
 from app.config import Settings
-from app.context import TokenBudgetManager
+from app.context import ContextBuilder, TokenBudgetManager
 from app.db.repositories import (
     ChatRepository,
     ChatSummaryRepository,

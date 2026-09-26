@@ -212,6 +212,8 @@ export interface SystemSettings {
   context_keep_recent: number;
   context_trigger_ratio: number;
   memory_retrieval_limit: number;
+  /** A13: мин. объём сообщения для извлечения памяти. */
+  memory_extraction_min_chars: number;
 }
 
 /** Последний failed/aborted run (AdminStats.recent_failed_runs, V2 extra 2026-09-25). */

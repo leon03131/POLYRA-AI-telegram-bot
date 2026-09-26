@@ -65,12 +65,17 @@ async def grant_access(
     actor, _ = current
     fields = body.model_dump(exclude_unset=True)
     telegram_user_id = fields.pop("telegram_user_id")
-    await admin_service.grant_access(
-        session,
-        actor_id=actor.telegram_user_id,
-        telegram_user_id=telegram_user_id,
-        **fields,
-    )
+    try:
+        await admin_service.grant_access(
+            session,
+            actor_id=actor.telegram_user_id,
+            telegram_user_id=telegram_user_id,
+            **fields,
+        )
+    except ValueError as exc:
+        # A26: bounds-валидация лимитов в сервисе поднимает ValueError —
+        # отдаём 400, а не необработанный 500.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     await session.commit()
     return {"ok": True}
 

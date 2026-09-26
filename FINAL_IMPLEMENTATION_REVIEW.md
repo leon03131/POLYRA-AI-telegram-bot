@@ -254,3 +254,96 @@ pytest/ruff/mypy воспроизводимы (488/0/0).
 `polyra-miniapp.md`, `polyra-search-security.md`, `polyra-db-api.md`,
 `polyra-qa-release.md`.
 Команды и exit codes прогонов — в `polyra-qa-release.md` (раздел «Результаты реальных запусков»).
+
+---
+
+# ДОПОЛНЕНИЕ: раунды 2 и 3 (закрытие находок аудита)
+
+## Раунд 2 — ре-аудит фиксов KIMI (commit `0be0524`, проверен 25.09.2026)
+
+Главный агент лично перепроверил каждый дефект §3 и процессные фиксы по диффу
+`e4ac383..0be0524` и свежим прогонам.
+
+**Подтверждено исправленным (код + прогоны 492 passed / ruff / mypy 155 / tsc / build):**
+- Все 7 прод-дефектов §3: Stop-partial `parse_mode=None` + `_split_text`; orphan
+  tool_calls (в историю только исполненные); exclude_message_id (дубль current);
+  `_cap_segment_prefix` (элизия убрана, boundary на покрытый префикс, тест
+  переписан); rehydration всегда для image-моделей + legacy-плейсхолдеры;
+  per-call `min_chars` + ContextBuilder на effective (DB) настройках; `_tail`
+  с префиксом внутри лимита.
+- Процессные фиксы в коде: A10 (PERMISSION_DENIED → cooldown 24ч, тест
+  переписан), A23 (content_filter → SafetyError), A26-bounds (валидация),
+  A27 (`--write-runtime` → `capability_probe:<id>` в system_settings, `/api/models`
+  фильтрует thinking_modes по свежему probe с TTL 7 дней + 4 поведенческих
+  теста), A30 (graveyard вместо mid-stream aclose), A32 (SOURCES первой
+  строкой — переживает truncation), A34 (supervisor `asyncio.wait
+  FIRST_COMPLETED` + cancel), A35 (avg_ttft_s/error_rate/recent_failed_runs),
+  A36 (`.github/workflows/ci.yml`), A38 (README/KNOWN_ISSUES), offset-пагинация
+  фронта (`useInfiniteQuery` — «вечная кнопка» убрана).
+
+**Расхождения раунда 2 (4 шт.):**
+1. A13: `memory_extraction_min_chars` не экспонирован в Admin System API
+   (admin_system.py не менялся) — обвязка DB→extractor работала, но ручки в
+   админке не было.
+2. A26: `ValueError` из `grant_access` не ловился роутом → 500 вместо 400.
+3. 4 из 7 P1-фиксов без регрессионных тестов (приложение к FIX_REPORT_V2
+   завышало покрытие): Stop-partial (мок стал толерантным, без ассерта),
+   orphan tool_calls (теста с >4 вызовами нет), дубль current (test_context
+   не менялся), per-call min_chars (не тестировался).
+4. «Честные остатки» неполные: A15-1 (без summary сообщения старше окна
+   `recent*2` молча выпадают — builder.py не трогался), A11-остаток (Stop во
+   время tool-раунда/финализации теряет partial).
+
+**P0-регрессия, найденная при закрытии расхождений (см. раунд 3):** коммит
+`0be0524` использовал `ContextBuilder` в рантайме (`generation.py:592`),
+импортировав его только под `TYPE_CHECKING` → `NameError` на builder-пути
+каждого запроса генерации (production wiring `main.py` всегда передаёт
+context_builder). Все гейты это пропускали: mypy доволен TYPE_CHECKING-импортом,
+pytest не гоняет `_build_context` через реальный модуль. Показательный пример
+паттерна «тест-зелёный — прод-сломан», внесённого самим фиксом.
+
+## Раунд 3 — закрытие расхождений (сессия GLM, субагенты + lead)
+
+Делегировано 3 субагентам с непересекающимися scope (отчёты в
+`.agents/reports/fix-v2/`: `polyra-db-api/a13-admin-system-minchars_a26-grant-400.md`,
+`polyra-qa-release/a20-a39-a15-regression-tests.md`,
+`polyra-context/A13-minchars-override-tests_A17-compactor-docstring.md`);
+`app/services/generation.py` — зона lead (правка импорта).
+
+Сделано:
+1. **A13**: `memory_extraction_min_chars` в Admin System API (GET/PUT/валидация
+   >0, `admin_system.py`) + поле в `AdminSystemPage.tsx` + тип + 5 тестов.
+2. **A26**: `ValueError` → `HTTPException(400)` в `admin_access.py` + тест
+   (grant с `requests_per_day=-5` → 400).
+3. **11 регрессионных тестов**: A20 Stop-partial (`parse_mode=None` + полная
+   разбивка, HTML-опасный текст), A39 orphan tool_calls (5 вызовов при лимите 4:
+   в следующем запросе ровно 4 tool_call ↔ 4 tool_result), A15 дубль current
+   (маркер ровно 1 раз при сводке; тест содержит guard P0 — рантайм-импорт
+   `ContextBuilder`), A13 per-call min_chars (3 теста: override вверх/вниз/None),
+   A13 admin API (5 тестов). Тесты A20/A39/A15 проверены «упали бы до фикса»
+   подстановкой `git show 0be0524^` — реальные провалы, не рассуждение.
+4. **P0-fix (lead)**: `ContextBuilder` перенесён в рантайм-импорт
+   (`generation.py:29`); проверено `hasattr(generation, 'ContextBuilder') == True`;
+   тестовый шим заменён на постоянный guard.
+5. Косметика: докстринг `_cap_segment_prefix` приведён к коду (без «усечения»).
+
+**Итоговые гейты (свежий прогон):** pytest `tests -q` → **503 passed, 0 failed/
+skipped, exit 0**; `ruff check .` → exit 0; `mypy app tests scripts` → exit 0
+(156 файлов); `npm run typecheck` + `npm run build` (miniapp) → exit 0.
+
+## Открытые пункты после раунда 3
+
+- **A15-1**: без summary сообщения старше `recent_history_limit*2` не попадают
+  в контекст и не триггерят compaction (builder.py) — P2.
+- **A11-остаток**: Stop во время tool-раунда/финализации теряет partial, run
+  зависает «running» до рестарта (CancelledError ловится только в `_consume`) — P2.
+- PostgreSQL barrier-тесты (A05/A09), frontend E2E, live-сценарии (Telegram
+  draft tiers, VPS SIGTERM, Gemini/Alibaba live) — не прогонялись в этой среде.
+- Kimi DTL — optional по ТЗ §25, не реализован.
+- CI-файл создан, но реальных прогонов GitHub Actions из этой среды не видно.
+
+**Вердикт дополнения:** 7/7 прод-дефектов раунда 1 закрыты и теперь закрыты
+тестами; процессные фиксы подтверждены; P0-регрессия 0be0524 (NameError) поймана
+и исправлена. FIX_REPORT_V2 оставался завышенным по 4 позициям — все 4 закрыты
+в раунде 3. Документ не переоценивает статус: A15-1/A11-остаток и live-проверки
+остаются открытыми.

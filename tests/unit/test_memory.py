@@ -506,6 +506,75 @@ async def test_extractor_skips_short_exchange_by_min_chars() -> None:
     assert calls == []  # LLM не вызывалась
 
 
+async def test_extractor_per_call_min_chars_overrides_ctor_upward() -> None:
+    """A13: per-call override перекрывает ctor-параметр в большую сторону.
+
+    Ctor min_chars=10, но effective (DB) настройка — 200: короткий обмен
+    не извлекается, LLM-стрим не вызывался.
+    """
+    store = FakeMemoryStore()
+    stream, calls = _stream_fn([[TextDelta(_VALID_JSON), Done("stop")]])
+    extractor = _extractor(stream, store, min_chars=10)
+
+    added = await extractor.extract_and_store(
+        user_id=uuid.uuid4(),
+        chat_id=uuid.uuid4(),
+        user_text="короткий вопрос",
+        assistant_text="короткий ответ",
+        min_chars=200,
+    )
+
+    assert added == 0
+    assert calls == []  # override 200 перекрыл ctor 10 — до LLM не дошли
+    assert store.add_calls == []
+
+
+async def test_extractor_per_call_min_chars_overrides_ctor_downward() -> None:
+    """A13: per-call override перекрывает ctor-параметр в меньшую сторону.
+
+    Ctor min_chars=200, но effective (DB) настройка — 10: тот же короткий
+    обмен извлекается — стрим вызван, store получил новые записи.
+    """
+    store = FakeMemoryStore()
+    stream, calls = _stream_fn([[TextDelta(_VALID_JSON), Done("stop")]])
+    extractor = _extractor(stream, store, min_chars=200)
+
+    added = await extractor.extract_and_store(
+        user_id=uuid.uuid4(),
+        chat_id=uuid.uuid4(),
+        user_text="короткий вопрос",
+        assistant_text="короткий ответ",
+        min_chars=10,
+    )
+
+    assert added == 2
+    assert len(calls) == 1  # override 10 перекрыл ctor 200 — извлечение состоялось
+    assert len(store.add_calls) == 2
+
+
+async def test_extractor_per_call_min_chars_none_falls_back_to_ctor() -> None:
+    """A13: min_chars=None (граница override) — применяется ctor-значение.
+
+    Ctor min_chars=200, per-call None: короткий обмен не извлекается,
+    LLM-стрим не вызывался.
+    """
+    store = FakeMemoryStore()
+    stream, calls = _stream_fn([[TextDelta(_VALID_JSON), Done("stop")]])
+    extractor = _extractor(stream, store, min_chars=200)
+
+    added = await extractor.extract_and_store(
+        user_id=uuid.uuid4(),
+        chat_id=uuid.uuid4(),
+        user_text="короткий вопрос",
+        assistant_text="короткий ответ",
+        min_chars=None,
+    )
+
+    assert added == 0
+    assert calls == []  # None → действует ctor 200
+    assert store.add_calls == []
+
+
 async def test_extractor_isolates_user_id() -> None:
     owner_id, other_id = uuid.uuid4(), uuid.uuid4()
     foreign = _mem(user_id=other_id, text="Пользователь любит кошек", importance=5)
