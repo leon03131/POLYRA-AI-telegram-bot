@@ -16,6 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api import routes
+from app.api.routes import chat_web
 from app.config import Settings
 from app.llm.registry import ModelRegistry
 from app.search.manager import SearchManager
@@ -32,14 +33,22 @@ def create_app(
     registry: ModelRegistry,
     generation_registry: Any | None = None,
     search_manager: SearchManager | None = None,
+    generation_service: Any | None = None,
+    bot: Any | None = None,
 ) -> FastAPI:
-    """Собрать FastAPI-приложение: state, роутеры /api, /health, /ready, статика."""
+    """Собрать FastAPI-приложение: state, роутеры /api, /health, /ready, статика.
+
+    web5: generation_service/bot кладутся в app.state (кладёт main.py) и
+    используются роутами web-чата; без generation_service они отвечают 503
+    (роуты регистрируются всегда, чтобы контракт /api был стабильным)."""
     app = FastAPI(title="aibot Mini App API", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.settings = settings
     app.state.session_factory = session_factory
     app.state.crypto = crypto
     app.state.registry = registry
     app.state.generation_registry = generation_registry
+    app.state.generation_service = generation_service
+    app.state.bot = bot
     # Один SearchManager на процесс (lifecycle в main) — не плодим инстансы (A30).
     app.state.search_manager = search_manager or SearchManager(
         session_factory=session_factory, crypto=crypto
@@ -55,6 +64,7 @@ def create_app(
         routes.me.router,
         routes.settings.router,
         routes.chats.router,
+        chat_web.router,
         routes.memory.router,
         routes.admin_users.router,
         routes.admin_access.router,

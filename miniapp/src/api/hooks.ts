@@ -18,6 +18,7 @@ import type {
   SearchBackendsResponse,
   SystemSettings,
   UserSettings,
+  WebMessagesResponse,
 } from "./types";
 
 /** Ключи кеша React Query. */
@@ -25,6 +26,7 @@ export const qk = {
   me: ["me"] as const,
   models: ["models"] as const,
   chats: ["chats"] as const,
+  messages: (chatId: string) => ["chats", "messages", chatId] as const,
   settings: ["settings"] as const,
   memories: ["memories"] as const,
   adminStats: ["admin", "stats"] as const,
@@ -96,6 +98,69 @@ export function useChat(id: string | undefined) {
     queryKey: [...qk.chats, "detail", id ?? ""] as const,
     queryFn: () => api<ChatResponse>(`/api/chats/${id}`),
     enabled: !!id,
+  });
+}
+
+// ---------- web5: сообщения веб-чата ----------
+
+export const MESSAGES_PAGE_SIZE = 50;
+
+/** Страница истории web-чата: ASC-сообщения + фактический offset страницы. */
+export interface ChatMessagesPage extends WebMessagesResponse {
+  offset: number;
+}
+
+async function fetchMessagesPage(chatId: string, offset: number): Promise<ChatMessagesPage> {
+  const qs = new URLSearchParams({
+    limit: String(MESSAGES_PAGE_SIZE),
+    offset: String(offset),
+  });
+  const res = await api<WebMessagesResponse>(`/api/chats/${chatId}/messages?${qs.toString()}`);
+  return { ...res, offset };
+}
+
+/**
+ * Последняя страница истории: probe offset=0 даёт total; короткий чат
+ * (total ≤ limit) закрывается одним запросом, длинный — вторым запросом
+ * хвоста. Защита от гонки (история сократилась между запросами): пустой
+ * хвост при total>0 перечитывается с актуальным offset.
+ */
+async function fetchTailPage(chatId: string): Promise<ChatMessagesPage> {
+  const probe = await fetchMessagesPage(chatId, 0);
+  const tailOffset = probe.total - MESSAGES_PAGE_SIZE;
+  if (tailOffset <= 0) return probe;
+  const tail = await fetchMessagesPage(chatId, tailOffset);
+  if (tail.messages.length === 0 && tail.total > 0) {
+    return fetchMessagesPage(chatId, Math.max(0, tail.total - MESSAGES_PAGE_SIZE));
+  }
+  return tail;
+}
+
+/**
+ * История сообщений web-чата (web5): изначально грузится ПОСЛЕДНЯЯ страница
+ * (offset = max(0, total − limit)), «Загрузить ещё» — fetchPreviousPage
+ * (prepend старых). pageParam −1 — режим tail (probe + хвост).
+ * staleTime маленький: сообщения, отправленные из Telegram, должны быть
+ * видны при каждом открытии чата.
+ */
+export function useChatMessages(chatId: string | undefined) {
+  return useInfiniteQuery({
+    queryKey: qk.messages(chatId ?? ""),
+    queryFn: ({ pageParam }): Promise<ChatMessagesPage> => {
+      if (!chatId) throw new Error("chatId is required");
+      return pageParam < 0
+        ? fetchTailPage(chatId)
+        : fetchMessagesPage(chatId, pageParam as number);
+    },
+    initialPageParam: -1,
+    // пагинация только назад («Загрузить ещё» вверх); вперёд страниц нет
+    getNextPageParam: () => undefined,
+    getPreviousPageParam: (firstPage) =>
+      firstPage.offset > 0
+        ? Math.max(0, firstPage.offset - MESSAGES_PAGE_SIZE)
+        : undefined,
+    enabled: !!chatId,
+    staleTime: 3_000,
   });
 }
 

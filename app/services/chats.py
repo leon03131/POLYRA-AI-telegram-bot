@@ -63,6 +63,16 @@ class ChatService:
             return latest
         return await self.create_chat(user_id)
 
+    async def get_chat_for_user(self, user_id: uuid.UUID, chat_id: uuid.UUID) -> Chat | None:
+        """Чат по id с проверкой владельца (web5: генерация в указанный чат).
+
+        Архивный чат возвращается — открытие архива допустимо (как /open);
+        удалённый/чужой → None."""
+        chat = await self._chats.get(chat_id)
+        if chat is None or chat.owner_user_id != user_id:
+            return None
+        return chat
+
     async def rename_chat(self, chat_id: uuid.UUID, title: str) -> Chat | None:
         """Переименовать чат; None, если чат не найден."""
         return await self._chats.rename(chat_id, title)

@@ -66,7 +66,7 @@ export function HomePage() {
           title={chat.title ?? "Без названия"}
           subtitle="Нажмите, чтобы открыть настройки чата"
           chevron
-          onClick={() => navigate(`/chats/${chat.id}`)}
+          onClick={() => navigate(`/chats/${chat.id}/settings`)}
         />
       </Section>
 

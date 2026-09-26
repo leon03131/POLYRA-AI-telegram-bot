@@ -6,6 +6,7 @@ import { useTelegramBackButton } from "./telegram/webapp";
 import { Button, Spinner } from "./components";
 import { HomePage } from "./pages/HomePage";
 import { ChatsPage } from "./pages/ChatsPage";
+import { ChatPage } from "./pages/ChatPage";
 import { ChatSettingsPage } from "./pages/ChatSettingsPage";
 import { MemoryPage } from "./pages/MemoryPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -106,6 +107,10 @@ function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => voi
 
 function AppShell() {
   const auth = useAuth();
+  const location = useLocation();
+  // web5: экран чата (/chats/:id) — иммерсивный режим без таббара
+  // (настройки чата живут на /chats/:id/settings, таббар там остаётся).
+  const isChatScreen = /^\/chats\/[^/]+$/.test(location.pathname);
 
   if (auth.status === "loading") {
     return (
@@ -124,7 +129,8 @@ function AppShell() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/chats" element={<ChatsPage />} />
-          <Route path="/chats/:id" element={<ChatSettingsPage />} />
+          <Route path="/chats/:id" element={<ChatPage />} />
+          <Route path="/chats/:id/settings" element={<ChatSettingsPage />} />
           <Route path="/memory" element={<MemoryPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/admin" element={<AdminLayout />}>
@@ -141,7 +147,7 @@ function AppShell() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
-      <TabBar isOwner={auth.isOwner} />
+      {!isChatScreen && <TabBar isOwner={auth.isOwner} />}
     </div>
   );
 }

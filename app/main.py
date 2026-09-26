@@ -102,6 +102,10 @@ async def main() -> None:
         registry=registry,
         generation_registry=generation_registry,
         search_manager=search_manager,
+        # web5: единый сервис генерации для веб-чата Mini App (одна активная
+        # генерация на чат общая для Telegram и Web) + бот для rehydrate фото.
+        generation_service=generation_service,
+        bot=bot,
     )
     uvicorn_config = uvicorn.Config(
         api,

@@ -17,7 +17,7 @@ import uuid
 from collections.abc import AsyncIterator, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
@@ -66,6 +66,100 @@ logger = logging.getLogger(__name__)
 
 _BUSY_MESSAGE = "⏳ Дождитесь завершения текущего ответа."
 _MODEL_DENIED_MESSAGE = "⛔ Модель недоступна на вашем доступе."
+
+
+class GenerationStreamer(Protocol):
+    """Стример вывода генерации (structural): Telegram-драфты или Web SSE."""
+
+    async def append(self, delta: str) -> None: ...
+
+    async def flush(self, *, force: bool = False) -> None: ...
+
+    async def finalize(self) -> Any: ...
+
+    async def fail(self, user_message: str) -> None: ...
+
+
+class GenerationChannel(Protocol):
+    """Поверхность доставки генерации: Telegram-чат или Web (Mini App SSE).
+
+    web5: единственный контракт, через который generate() общается с
+    пользователем. История/чаты/квоты общие — различается только доставка.
+    """
+
+    bot: Bot
+
+    async def notify(self, text: str) -> None:
+        """Пользовательское сообщение вне стрима (занят/отказ модели/лимиты)."""
+        ...
+
+    def make_streamer(self, draft_id: int) -> GenerationStreamer: ...
+
+    async def deliver_cancelled_partial(self, text: str) -> None:
+        """Partial при отмене, если стрим его не доставил (Telegram)."""
+        ...
+
+
+@dataclass(slots=True)
+class TelegramChannel:
+    """Доставка в Telegram: DraftStreamer + plain-сообщения (parse_mode=None)."""
+
+    bot: Bot
+    tg_chat_id: int
+
+    async def notify(self, text: str) -> None:
+        await self.bot.send_message(self.tg_chat_id, text, parse_mode=None)
+
+    def make_streamer(self, draft_id: int) -> DraftStreamer:
+        return DraftStreamer(self.bot, self.tg_chat_id, draft_id)
+
+    async def deliver_cancelled_partial(self, text: str) -> None:
+        # A20/A21: полный partial разбивкой, plain (default HTML бота не парсит).
+        for part in _split_text(text, MESSAGE_LIMIT):
+            await self.bot.send_message(self.tg_chat_id, part, parse_mode=None)
+
+
+@dataclass(slots=True)
+class WebChannel:
+    """Дelivery в Mini App через SSE-очередь (web5).
+
+    bot нужен для rehydrate изображений (Telegram file API единый для всех
+    поверхностей). Финальные события (done/cancelled с message_id) шлёт
+    SSE-эндпоинт после персистенса — сюда приходят только дельты и ошибки.
+    """
+
+    queue: asyncio.Queue[dict[str, Any]]
+    bot: Bot
+
+    async def notify(self, text: str) -> None:
+        await self.queue.put({"event": "error", "data": {"message": text}})
+
+    def make_streamer(self, draft_id: int) -> WebStreamer:
+        return WebStreamer(self.queue)
+
+    async def deliver_cancelled_partial(self, text: str) -> None:
+        # partial уже показан стримом дельт — не дублируем.
+        return None
+
+
+@dataclass(slots=True)
+class WebStreamer:
+    """Стример веб-генерации: дельты → события SSE-очереди."""
+
+    queue: asyncio.Queue[dict[str, Any]]
+
+    async def append(self, delta: str) -> None:
+        if delta:
+            await self.queue.put({"event": "delta", "data": {"text": delta}})
+
+    async def flush(self, *, force: bool = False) -> None:
+        return None
+
+    async def finalize(self) -> None:
+        return None
+
+    async def fail(self, user_message: str) -> None:
+        await self.queue.put({"event": "error", "data": {"message": user_message}})
 
 
 @dataclass(slots=True)
@@ -138,6 +232,19 @@ class GenerationRegistry:
         gen.cancellation.set()
         gen.task.cancel()
         return True
+
+    def stop_for_chat(self, chat_id: uuid.UUID) -> bool:
+        """Отмена активной генерации чата (web5: Stop из Mini App).
+
+        Инвариант «одна активная генерация на чат» общий для Telegram и Web —
+        остановить можно с любой поверхности. Идемпотентно, как stop()."""
+        for gen in list(self._by_draft.values()):
+            if gen.chat_id == chat_id:
+                if not gen.cancellation.is_set():
+                    gen.cancellation.set()
+                    gen.task.cancel()
+                return True
+        return False
 
 
 @dataclass(slots=True)
@@ -425,28 +532,38 @@ class GenerationService:
         permissions: EffectivePermissions,
         current_parts: list[dict[str, Any]],
         model_hint_supports_image: bool = False,
+        channel: GenerationChannel | None = None,
+        chat_id: uuid.UUID | None = None,
     ) -> None:
         """Полный цикл ответа. Ошибки провайдеров не поднимаются — пользователю
-        уходит текст через DraftStreamer.fail, запуск фиксируется failed.
+        уходит текст через стример канала, запуск фиксируется failed.
 
         model_hint_supports_image — необязательная подсказка роутера «в сообщении
         есть изображение»; наличие image-part в current_parts проверяется всегда.
+
+        web5: channel — поверхность доставки (None → Telegram по tg_chat_id);
+        chat_id — конкретный чат (None → текущий чат пользователя). Инвариант
+        «одна активная генерация на чат» общий для обеих поверхностей.
         """
+        if channel is None:
+            channel = TelegramChannel(bot=bot, tg_chat_id=tg_chat_id)
+        output: GenerationChannel = channel
         has_image = model_hint_supports_image or any(
             part.get("type") == "image" for part in current_parts
         )
         prepared = await self._prepare(
+            channel=output,
             bot=bot,
-            tg_chat_id=tg_chat_id,
             user=user,
             permissions=permissions,
             current_parts=current_parts,
             has_image=has_image,
+            chat_id=chat_id,
         )
         if prepared is None:
             return
 
-        streamer = DraftStreamer(bot, tg_chat_id, prepared.draft_id)
+        streamer = output.make_streamer(prepared.draft_id)
         cancellation = asyncio.Event()
         task = asyncio.current_task()
         assert task is not None  # generate() вызывается из aiogram task-хендлера
@@ -481,8 +598,7 @@ class GenerationService:
                 await self._save_cancelled(
                     prepared,
                     final_outcome,
-                    bot=bot,
-                    tg_chat_id=tg_chat_id,
+                    channel=channel,
                     attempts=attempts,
                     attempt_ids=attempt_ids,
                 )
@@ -543,6 +659,13 @@ class GenerationService:
             logger.warning("jina reader недоступен", exc_info=True)
             return None
 
+    def stop_chat(self, chat_id: uuid.UUID) -> bool:
+        """Остановить активную генерацию чата (web5: публичный accessor).
+
+        Стоп работает с любой поверхности (Telegram-Stop или Mini App) —
+        инвариант «одна активная генерация на чат» общий."""
+        return self._generations.stop_for_chat(chat_id)
+
     def _model_denial(
         self,
         model_def: Any,
@@ -595,12 +718,40 @@ class GenerationService:
             enabled = [t for t in enabled if t.name != "set_chat_title"]
         return enabled
 
+    async def _load_uncovered_history(
+        self,
+        summary_row: Any,
+        messages_repo: MessageRepository,
+        chat_id: uuid.UUID,
+        exclude_message_id: uuid.UUID | None,
+    ) -> tuple[list[Message] | None, int]:
+        """История для builder и индекс первого непокрытого сообщения.
+
+        При сводке — вся история после covered_until (A15: без дубля текущего
+        сообщения, оно идёт отдельно как current). Без сводки — None: caller
+        использует переданное окно list_recent, uncovered_from=0."""
+        if summary_row is None:
+            return None, 0
+        history = await messages_repo.list_all(chat_id)
+        if exclude_message_id is not None:
+            # A15: только что записанное user-сообщение не дублируем.
+            history = [m for m in history if m.id != exclude_message_id]
+        uncovered_from = 0
+        if summary_row.covered_until_message_id is not None:
+            covered_id = str(summary_row.covered_until_message_id)
+            for index, message in enumerate(history):
+                if str(message.id) == covered_id:
+                    uncovered_from = index + 1
+                    break
+        return history, uncovered_from
+
     async def _build_context(
         self,
         session: AsyncSession,
         bot: Bot,
-        tg_chat_id: int,
+        tg_chat_id: int | None = None,
         *,
+        channel: GenerationChannel | None = None,
         chat_id: uuid.UUID,
         model_def: Any,
         history: list[Message],
@@ -624,20 +775,14 @@ class GenerationService:
             return llm_messages, base_system_prompt, False, None
 
         summary_row = await ChatSummaryRepository(session).get_for_chat(chat_id)
-        uncovered_from = 0
-        if summary_row is not None:
-            # A15: вся непокрытая история, а не только хвост лимита
-            history = await messages_repo.list_all(chat_id)
-            if exclude_message_id is not None:
-                # A15: только что записанное user-сообщение не дублируем — оно
-                # добавляется отдельно как current.
-                history = [m for m in history if m.id != exclude_message_id]
-            if summary_row.covered_until_message_id is not None:
-                covered_id = str(summary_row.covered_until_message_id)
-                for index, message in enumerate(history):
-                    if str(message.id) == covered_id:
-                        uncovered_from = index + 1
-                        break
+        loaded, uncovered_from = await self._load_uncovered_history(
+            summary_row,
+            messages_repo,
+            chat_id,
+            exclude_message_id,
+        )
+        if loaded is not None:
+            history = loaded
         if model_def.supports_images:
             # A18: rehydration для image-capable моделей; round4-P1 (perf) — качаем
             # только хвост, который реально попадёт в контекст (uncovered-сегмент ∩
@@ -668,10 +813,12 @@ class GenerationService:
         )
         if not built.fits:
             await session.commit()
-            await bot.send_message(
-                tg_chat_id,
-                "⛔ Контекст слишком большой даже после свёртки. Начните новый чат (/new).",
-            )
+            notify = channel.notify if channel is not None else None
+            text = "⛔ Контекст слишком большой даже после свёртки. Начните новый чат (/new)."
+            if notify is not None:
+                await notify(text)
+            elif tg_chat_id is not None:
+                await bot.send_message(tg_chat_id, text, parse_mode=None)
             return None
         needs_compaction = built.needs_compaction
         if summary_row is None and len(history) >= self._settings.recent_history_limit * 2:
@@ -732,7 +879,7 @@ class GenerationService:
     async def _stream_loop(
         self,
         prepared: _PreparedGeneration,
-        streamer: DraftStreamer,
+        streamer: GenerationStreamer,
         *,
         llm_tools: list[LLMTool] | None,
         tool_runner: ToolRunner | None,
@@ -824,7 +971,7 @@ class GenerationService:
     async def _consume_round(
         self,
         request: LLMRequest,
-        streamer: DraftStreamer,
+        streamer: GenerationStreamer,
         prepared: _PreparedGeneration,
         cancellation: asyncio.Event,
     ) -> StreamOutcome | None:
@@ -843,7 +990,7 @@ class GenerationService:
     async def _abort_round(
         self,
         prepared: _PreparedGeneration,
-        streamer: DraftStreamer,
+        streamer: GenerationStreamer,
         exc: BaseException,
         request: LLMRequest,
     ) -> None:
@@ -1001,7 +1148,7 @@ class GenerationService:
     async def _consume(
         self,
         stream: AsyncIterator[LLMEvent],
-        streamer: DraftStreamer,
+        streamer: GenerationStreamer,
         cancellation: asyncio.Event,
     ) -> StreamOutcome:
         """Потребить события стрима в streamer; вернуть итог (текст, usage, флаги).
@@ -1051,8 +1198,7 @@ class GenerationService:
     async def _check_user_limits(
         self,
         session: AsyncSession,
-        bot: Bot,
-        tg_chat_id: int,
+        channel: GenerationChannel,
         user: User,
         permissions: EffectivePermissions,
     ) -> bool:
@@ -1063,43 +1209,64 @@ class GenerationService:
             today_count = await runs_repo.count_since(user.id, since=day_start)
             if today_count >= permissions.requests_per_day:
                 await session.commit()
-                await bot.send_message(
-                    tg_chat_id, "⛔ Дневной лимит запросов исчерпан. Попробуйте завтра."
-                )
+                await channel.notify("⛔ Дневной лимит запросов исчерпан. Попробуйте завтра.")
                 return True
         if permissions.token_limit is not None:
             tokens_today = await runs_repo.tokens_since(user.id, since=day_start)
             if tokens_today >= permissions.token_limit:
                 await session.commit()
-                await bot.send_message(
-                    tg_chat_id, "⛔ Дневной лимит токенов исчерпан. Попробуйте завтра."
-                )
+                await channel.notify("⛔ Дневной лимит токенов исчерпан. Попробуйте завтра.")
                 return True
         if self._generations.count_active_for_user(user.id) >= max(
             permissions.max_concurrent_generations, 1
         ):
             await session.commit()
-            await bot.send_message(tg_chat_id, _BUSY_MESSAGE)
+            await channel.notify(_BUSY_MESSAGE)
             return True
         return False
+
+    async def _select_chat(
+        self,
+        channel: GenerationChannel,
+        chat_service: ChatService,
+        user_id: uuid.UUID,
+        chat_id: uuid.UUID | None,
+    ) -> tuple[Chat, uuid.UUID] | None:
+        """Чат генерации: указанный (web5, с проверкой владельца) или текущий
+        (Telegram). None — отказ уже отправлен пользователю."""
+        if chat_id is None:
+            chat = await chat_service.get_or_create_current_chat(user_id)
+        else:
+            selected = await chat_service.get_chat_for_user(user_id, chat_id)
+            if selected is None:
+                await channel.notify("⛔ Чат не найден или недоступен.")
+                return None
+            chat = selected
+        return chat, chat.id
 
     async def _prepare(
         self,
         *,
+        channel: GenerationChannel,
         bot: Bot,
-        tg_chat_id: int,
         user: User,
         permissions: EffectivePermissions,
         current_parts: list[dict[str, Any]],
         has_image: bool,
+        chat_id: uuid.UUID | None = None,
     ) -> _PreparedGeneration | None:
-        """Проверки + запись user-сообщения и запуска (commit); None — ответили, стоп."""
+        """Проверки + запись user-сообщения и запуска (commit); None — ответили, стоп.
+
+        web5: chat_id=None → текущий чат пользователя (Telegram-путь);
+        явный chat_id → указанный чат (Web-путь), проверка владельца."""
         async with self._session_factory() as session:
             chat_service = ChatService(session)
-            chat = await chat_service.get_or_create_current_chat(user.id)
-            chat_id = chat.id
+            selected = await self._select_chat(channel, chat_service, user.id, chat_id)
+            if selected is None:
+                return None
+            chat, chat_id = selected
             if self._generations.find_active_for_chat(chat_id) is not None:
-                await bot.send_message(tg_chat_id, _BUSY_MESSAGE)
+                await channel.notify(_BUSY_MESSAGE)
                 return None
 
             messages_repo = MessageRepository(session)
@@ -1130,10 +1297,9 @@ class GenerationService:
             saved_model = chat.model_id or user_settings.default_model_id
             if saved_model is not None and self._registry.get_or_none(saved_model) is None:
                 await session.commit()
-                await bot.send_message(
-                    tg_chat_id,
+                await channel.notify(
                     f"⛔ Сохранённая модель «{saved_model}» больше недоступна. "
-                    "Откройте Mini App и выберите другую модель.",
+                    "Откройте Mini App и выберите другую модель."
                 )
                 return None
             model_id, thinking = resolve_model_and_thinking(
@@ -1152,13 +1318,11 @@ class GenerationService:
             )
             if denial is not None:
                 await session.commit()
-                await bot.send_message(tg_chat_id, denial)
+                await channel.notify(denial)
                 return None
 
             # Per-user лимиты гранта (server-side; скрытая кнопка ≠ защита)
-            limit_denial = await self._check_user_limits(
-                session, bot, tg_chat_id, user, permissions
-            )
+            limit_denial = await self._check_user_limits(session, channel, user, permissions)
             if limit_denial:
                 return None
 
@@ -1196,7 +1360,8 @@ class GenerationService:
             context_result = await self._build_context(
                 session,
                 bot,
-                tg_chat_id,
+                tg_chat_id=None,
+                channel=channel,
                 chat_id=chat_id,
                 model_def=model_def,
                 history=history,
@@ -1228,7 +1393,7 @@ class GenerationService:
                 # A05: partial unique index — вторая активная генерация на чат
                 # не проходит даже при гонке между процессами.
                 await session.rollback()
-                await bot.send_message(tg_chat_id, _BUSY_MESSAGE)
+                await channel.notify(_BUSY_MESSAGE)
                 return None
         return _PreparedGeneration(
             chat_id=chat_id,
@@ -1315,22 +1480,26 @@ class GenerationService:
         prepared: _PreparedGeneration,
         outcome: StreamOutcome,
         *,
-        bot: Bot,
-        tg_chat_id: int,
+        channel: GenerationChannel | None = None,
+        bot: Bot | None = None,
+        tg_chat_id: int | None = None,
         attempts: list[str] | None = None,
         attempt_ids: list[str] | None = None,
     ) -> None:
-        """Финал отмены: partial обычным сообщением + assistant message cancelled."""
+        """Финал отмены: partial (канал доставки) + assistant message cancelled."""
+        if channel is None:
+            assert bot is not None and tg_chat_id is not None
+            channel = TelegramChannel(bot=bot, tg_chat_id=tg_chat_id)
+        output_channel: GenerationChannel = channel
         partial = outcome.text
         if partial:
-            # A20: plain partial с parse_mode=None (бот по умолчанию HTML — иначе
-            # «<»/незакрытый тег из LLM-текста = BadRequest и partial теряется).
-            # A21: полный partial разбивается по лимитам, не обрезается одним фрагментом.
+            # A20: plain partial (default HTML бота не парсит LLM-текст).
+            # A21: Telegram — полный partial разбивкой по лимитам; Web — уже
+            # доставлен стримом дельт.
             try:
-                for part in _split_text(partial, MESSAGE_LIMIT):
-                    await bot.send_message(tg_chat_id, part, parse_mode=None)
+                await output_channel.deliver_cancelled_partial(partial)
             except TelegramAPIError:
-                logger.exception("не удалось отправить partial в чат %s", tg_chat_id)
+                logger.exception("не удалось отправить partial (chat %s)", prepared.chat_id)
         usage = outcome.usage
         try:
             async with self._session_factory() as session:

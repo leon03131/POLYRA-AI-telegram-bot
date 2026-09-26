@@ -59,6 +59,32 @@ class MessageRepository:
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_page(
+        self, chat_id: uuid.UUID, *, limit: int, offset: int
+    ) -> list[Message]:
+        """Страница истории чата (web5): ASC внутри страницы, offset — от старейшего."""
+        stmt = (
+            select(Message)
+            .where(Message.chat_id == chat_id)
+            .order_by(Message.created_at.asc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_last(self, chat_id: uuid.UUID, *, role: str | None = None) -> Message | None:
+        """Последнее сообщение чата (опционально указанной роли); None, если пусто.
+
+        web5: id последнего assistant-сообщения до/после генерации — маркер
+        нового ответа для финального SSE-события done/cancelled."""
+        stmt = select(Message).where(Message.chat_id == chat_id)
+        if role is not None:
+            stmt = stmt.where(Message.role == role)
+        stmt = stmt.order_by(Message.created_at.desc()).limit(1)
+        result = await self._session.execute(stmt)
+        return result.scalars().first()
+
     async def update_status(self, message_id: uuid.UUID, status: str) -> None:
         """Обновить status сообщения (no-op, если сообщение не найдено)."""
         message = await self.get(message_id)

@@ -316,3 +316,26 @@ export interface AdminMemoriesResponse {
   memories: MemoryItem[];
   total: number;
 }
+
+// ---------- web5: веб-экран чата (Mini App) ----------
+
+export type WebMessageRole = "user" | "assistant";
+
+/**
+ * Сообщение ленты web-чата: GET /api/chats/{id}/messages (ASC).
+ * status: pending | streaming | done | cancelled | failed (app/db/models/message.py).
+ */
+export interface WebMessage {
+  id: string;
+  role: WebMessageRole;
+  status: string;
+  created_at: string;
+  model_id: string | null;
+  text: string;
+  has_image: boolean;
+}
+
+export interface WebMessagesResponse {
+  messages: WebMessage[];
+  total: number;
+}

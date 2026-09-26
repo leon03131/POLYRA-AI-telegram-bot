@@ -98,7 +98,7 @@ async function rawRequest<T>(path: string, options: RequestOptions): Promise<T> 
   return (await res.json()) as T;
 }
 
-async function reauthenticate(): Promise<string> {
+export async function reauthenticate(): Promise<string> {
   if (!reauthHandler) throw new ApiError(401, "Сессия истекла");
   if (!reauthPromise) {
     reauthPromise = reauthHandler().finally(() => {
