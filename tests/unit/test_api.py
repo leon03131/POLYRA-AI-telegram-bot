@@ -32,9 +32,11 @@ from app.api import create_app
 from app.api.dependencies import get_current_user, get_db_session
 from app.api.routes import admin_system as admin_system_routes
 from app.api.routes import me as me_routes
+from app.api.routes import memory as memory_routes
 from app.config import Settings
 from app.db.models import User
 from app.llm.registry import default_registry
+from app.memory.normalizer import normalize_memory_text
 from app.security.crypto import CryptoBox
 from app.services import admin as admin_service
 from app.services import credentials as credentials_service
@@ -180,10 +182,27 @@ def _override_user(app: FastAPI, *, is_owner: bool, user: User | None = None) ->
     return user
 
 
+class _FakeModelOverrideRepository:
+    """Подмена ModelOverrideRepository для /api/models (round4-P1: DB-override)."""
+
+    def __init__(self, session: Any, overrides: dict[str, bool]) -> None:
+        self._overrides = overrides
+
+    async def get_all(self) -> dict[str, bool]:
+        return dict(self._overrides)
+
+
 def _override_probe_capabilities(
-    monkeypatch: pytest.MonkeyPatch, app: FastAPI, probe: dict[str, dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch,
+    app: FastAPI,
+    probe: dict[str, dict[str, Any]],
+    overrides: dict[str, bool] | None = None,
 ) -> None:
-    """Подменить DB-сессию (фейк) и probe-capabilities для /api/models (A27)."""
+    """Подменить DB-сессию (фейк), probe-capabilities и model_overrides для /api/models.
+
+    round4-P1: /api/models читает model_overrides (DB-override enabled) —
+    репозиторий тоже подменяем, чтобы unit-тесты не ходили в БД.
+    """
 
     async def _fake_session() -> Any:
         yield None
@@ -194,6 +213,11 @@ def _override_probe_capabilities(
         return probe
 
     monkeypatch.setattr(me_routes, "get_probe_capabilities", _fake_probe)
+    monkeypatch.setattr(
+        me_routes,
+        "ModelOverrideRepository",
+        lambda session: _FakeModelOverrideRepository(session, overrides or {}),
+    )
 
 
 async def test_me_serialization_with_override() -> None:
@@ -321,6 +345,41 @@ async def test_models_stale_probe_record_ignored(
     models = {model["model_id"]: model for model in response.json()["models"]}
     assert models["kimi-k3"]["thinking_modes"] == ["off", "low", "high", "max"]
     assert models["kimi-k3"]["probe_at"] is None
+
+
+async def test_models_hides_admin_disabled_by_db_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """round4-P1 (P2-2 аудита): DB-override enabled=False скрывает модель из /api/models.
+
+    Иначе «мёртвый круг»: генерация отклоняет отключённую админом модель
+    (_model_denial), а Mini App продолжает предлагать её выбор.
+    """
+    app = _make_app()
+    _override_user(app, is_owner=True)
+    _override_probe_capabilities(
+        monkeypatch, app, {}, overrides={"kimi-k3": False}
+    )
+    async with _client(app) as client:
+        response = await client.get("/api/models")
+    assert response.status_code == 200
+    model_ids = {model["model_id"] for model in response.json()["models"]}
+    assert "kimi-k3" not in model_ids  # админ выключил через model_overrides
+    assert "qwen3.8-flash" in model_ids  # модель без override остаётся видимой
+
+
+async def test_models_override_true_keeps_model_visible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """round4-P1: override enabled=True не фильтрует модель (скрывает только False)."""
+    app = _make_app()
+    _override_user(app, is_owner=True)
+    _override_probe_capabilities(monkeypatch, app, {}, overrides={"kimi-k3": True})
+    async with _client(app) as client:
+        response = await client.get("/api/models")
+    assert response.status_code == 200
+    model_ids = {model["model_id"] for model in response.json()["models"]}
+    assert "kimi-k3" in model_ids
 
 
 class _FakeProbeRowRepository:
@@ -766,3 +825,167 @@ async def test_admin_grant_access_not_positive_limit_400() -> None:
         )
     assert response.status_code == 400
     assert "must be positive" in response.json()["detail"]
+
+
+# --- round4-P1: null в NOT NULL-полях гранта → 400, не IntegrityError/500 --------
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["max_concurrent_generations", "can_use_web_search", "can_use_memory"],
+)
+async def test_admin_grant_access_null_in_not_null_fields_400(field: str) -> None:
+    """round4-P1: явный null в NOT NULL-полях гранта → 400 («cannot be null»).
+
+    Раньше null доходил до upsert_grant → NotNullViolation на flush →
+    необработанный 500. Контракт A26 «null снимает лимит» действует только
+    для nullable-полей (expires_at, requests_per_day, token_limit, note).
+    Валидация в сервисе — до обращения к БД.
+    """
+    app = _make_app()
+    _override_user(app, is_owner=True)
+
+    async def _fake_session() -> Any:
+        yield _FakeApiSession()
+
+    app.dependency_overrides[get_db_session] = _fake_session
+    async with _client(app) as client:
+        response = await client.post(
+            "/api/admin/access/grant",
+            json={"telegram_user_id": 111, field: None},
+        )
+    assert response.status_code == 400
+    assert "cannot be null" in response.json()["detail"]
+
+
+# --- round4-P2: PATCH /api/memory — null/oversize → 400, не 500 -------------------
+
+
+class _FakeMemoryRepository:
+    """Подмена MemoryRepository для PATCH /api/memory (round4-P2): одна запись."""
+
+    def __init__(self, session: Any, memory: Any) -> None:
+        self._memory = memory
+
+    async def update_fields(
+        self, memory_id: uuid.UUID, user_id: uuid.UUID, **fields: Any
+    ) -> Any:
+        memory = self._memory
+        if memory is None or memory.id != memory_id or memory.user_id != user_id:
+            return None
+        for field_name, value in fields.items():
+            setattr(memory, field_name, value)
+        return memory
+
+
+def _fake_memory(user_id: uuid.UUID) -> Any:
+    """Запись памяти (SimpleNamespace) для _FakeMemoryRepository."""
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        text="Старый факт",
+        normalized_text="старый факт",
+        category="general",
+        importance=5,
+        updated_at=datetime.now(UTC),
+        last_used_at=None,
+    )
+
+
+def _override_memory_routes(
+    monkeypatch: pytest.MonkeyPatch, app: FastAPI, memory: Any
+) -> Any:
+    """Подменить DB-сессию и MemoryRepository для PATCH /api/memory/{id}."""
+
+    async def _fake_session() -> Any:
+        yield _FakeApiSession()
+
+    app.dependency_overrides[get_db_session] = _fake_session
+    monkeypatch.setattr(
+        memory_routes,
+        "MemoryRepository",
+        lambda session: _FakeMemoryRepository(session, memory),
+    )
+    return memory
+
+
+@pytest.mark.parametrize("field", ["text", "category", "importance"])
+async def test_memory_patch_null_field_400(
+    monkeypatch: pytest.MonkeyPatch, field: str
+) -> None:
+    """round4-P2: PATCH {"text": null} (и др. NOT NULL-поля) → 400, не 500."""
+    app = _make_app()
+    user = _override_user(app, is_owner=True)
+    memory_obj = _override_memory_routes(monkeypatch, app, _fake_memory(user.id))
+    async with _client(app) as client:
+        response = await client.patch(
+            f"/api/memory/{memory_obj.id}", json={field: None}
+        )
+    assert response.status_code == 400
+    assert "cannot be null" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("category", ["x" * 33, ""])
+async def test_memory_patch_category_length_out_of_bounds_400(
+    monkeypatch: pytest.MonkeyPatch, category: str
+) -> None:
+    """round4-P2: category 33+ символов (String(32)) или пустая → 400, не 500."""
+    app = _make_app()
+    user = _override_user(app, is_owner=True)
+    memory_obj = _override_memory_routes(monkeypatch, app, _fake_memory(user.id))
+    async with _client(app) as client:
+        response = await client.patch(
+            f"/api/memory/{memory_obj.id}", json={"category": category}
+        )
+    assert response.status_code == 400
+    assert "category" in response.json()["detail"]
+
+
+async def test_memory_patch_whitespace_text_400(monkeypatch: pytest.MonkeyPatch) -> None:
+    """round4-P2: пустой/whitespace-only text → 400 (normalized_text теряет смысл)."""
+    app = _make_app()
+    user = _override_user(app, is_owner=True)
+    memory_obj = _override_memory_routes(monkeypatch, app, _fake_memory(user.id))
+    async with _client(app) as client:
+        response = await client.patch(
+            f"/api/memory/{memory_obj.id}", json={"text": "   "}
+        )
+    assert response.status_code == 400
+    assert "text" in response.json()["detail"]
+
+
+async def test_memory_patch_valid_fields_update_and_renormalize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """round4-P2: валидный PATCH проходит валидацию и пересчитывает normalized_text."""
+    app = _make_app()
+    user = _override_user(app, is_owner=True)
+    memory_obj = _override_memory_routes(monkeypatch, app, _fake_memory(user.id))
+    async with _client(app) as client:
+        response = await client.patch(
+            f"/api/memory/{memory_obj.id}",
+            json={"text": "Новый факт", "category": "work", "importance": 9},
+        )
+    assert response.status_code == 200
+    body = response.json()["memory"]
+    assert body["text"] == "Новый факт"
+    assert body["category"] == "work"
+    assert body["importance"] == 9
+    # normalized_text пересчитан роутом при смене text
+    assert memory_obj.normalized_text == normalize_memory_text("Новый факт")
+
+
+async def test_memory_patch_invalid_fields_do_not_reach_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """round4-P2: невалидный PATCH отклоняется до update_fields (значение не затёрто)."""
+    app = _make_app()
+    user = _override_user(app, is_owner=True)
+    memory_obj = _override_memory_routes(monkeypatch, app, _fake_memory(user.id))
+    async with _client(app) as client:
+        response = await client.patch(
+            f"/api/memory/{memory_obj.id}", json={"importance": 99}
+        )
+    assert response.status_code == 400
+    assert "importance" in response.json()["detail"]
+    assert memory_obj.importance == 5  # запись не изменена

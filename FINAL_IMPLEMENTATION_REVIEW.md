@@ -347,3 +347,87 @@ skipped, exit 0**; `ruff check .` → exit 0; `mypy app tests scripts` → exit 
 и исправлена. FIX_REPORT_V2 оставался завышенным по 4 позициям — все 4 закрыты
 в раунде 3. Документ не переоценивает статус: A15-1/A11-остаток и live-проверки
 остаются открытыми.
+
+---
+
+# ДОПОЛНЕНИЕ 2: раунд 4 — полный баг-хант после деплоя (25-26.09.2026)
+
+Контекст: после коммита 4925c40 и деплоя на VPS проведён повторный полный аудит
+8 субагентами (те же scopes; отчёты в `.agents/reports/final-review/round4-*.md`)
+с фокусом на класс «тест-зелёный — прод-сломан». Прод-деплой: `/opt/aibot`
+(SberCloud 176.108.245.225), контейнер healthy, /health + /ready 200,
+`hasattr(generation, 'ContextBuilder') == True` внутри контейнера.
+
+## Итог round4-аудита (до фиксов)
+
+- **P0: не найдено** — AST-детектор TYPE_CHECKING-имён в рантайме по всему
+  `app/` чист (валидирован на 0be0524, где флагает ровно line 592).
+- **P1 (12):** Stop в tool-раунде теряет partial и оставляет run «running»
+  (репро CancelledError, улетавший из `_stream_loop`); /chats — label кнопки
+  >64 симв (title из Mini App до 256) → TelegramBadRequest; немаппированные
+  Gemini finishReason (RECITATION и др.) → NetworkError → ложная ротация
+  здоровых проектов; `--write-runtime` стирает прежние accepted-evidence при
+  transient 429; **A32-регрессия 0be0524: заголовки «Источников» потеряны
+  (title==url) во всех ответах с web_search**; `_rehydrate_images` ловит только
+  TelegramAPIError — aiohttp-ошибка убивает генерацию до драфта; rehydrate качает
+  всю историю фото на каждый запрос; A15-1 подтверждён (без сводки окно 40
+  сообщений никогда не триггерит компакцию); AdminAudit/AdminMemory — «вечная
+  кнопка» (cap 500/200); /api/models игнорирует model_overrides (мёртвый круг
+  для юзера с выключенной моделью); grant null в NOT NULL-полях → 500.
+- **P2/P3:** ~30 позиций (см. round4-отчёты): IPv6-Host в PinnedHTTPTransport,
+  truncation посреди SOURCES, статусные тона админки, thinking-валидация,
+  компактор на env-снимке, FTS bind-параметр (индекс мёртв), covered_messages_count
+  завышение, tier-downgrade на один транзиент, пустой первый flush молчит,
+  UTF-16 длины лимитов, мутабельные фейки тестов, дыры покрытия (generate()
+  end-to-end, хендлеры, реальный DB-слой, Docker в CI) и др.
+- Гейты системно не исполняют прод-пути: `app/main.py`, `generate()`,
+  хендлеры chat/commands, реальный store_db/repositories, Docker build —
+  именно эти дыры пропустили P0 0be0524.
+
+## Раунд 4-фиксы (коммит этого батча)
+
+Делегирование: волна A — 4 субагента (polyra-telegram: /chats label ≤64 +
+open_chat parse_mode=None; polyra-gemini: терминальная классификация всех 18
+finishReason из SDK-enum — RECITATION/LANGUAGE/IMAGE_* → SafetyError,
+MALFORMED_FUNCTION_CALL → InvalidRequestError, прочие → SafetyError-fallback,
+без ротации/cooldown; polyra-alibaba: merge-семантика `--write-runtime`
+(rejected убирает режим, ok добавляет, **transient сохраняет прежний
+evidence**, `kind` в CheckResult, 19 юнит-тестов merge); polyra-miniapp:
+AdminAudit/AdminMemory → offset-пагинация useInfiniteQuery). Lead
+(generation.py, зона владельца): CancelledError в `_stream_loop` →
+partial-cancelled outcome (Stop в tool-раунде больше не теряет partial);
+best-effort финализация run при отмене в `generate()`; `_rehydrate_images` —
+широкий except + хвост `uncovered ∩ keep_recent*2` + cap 8; A32 —
+`collect_sources` предпочитает (title,url) из списка, обрезанные URL
+отбрасываются; A15-1 — полное окно без сводки форсирует needs_compaction;
+`stop()`/`stop_all_for_user` идемпотентны/отменяют задачу. Волна B —
+polyra-db-api: grant-null NOT NULL → 400; /api/models фильтрует
+model_overrides; PATCH memory null/oversize → 400.
+
+Тесты: +64 (567 total). Новые фиксирующие: A32-заголовки, отмена в
+tool-раунде, rehydrate хвост/cap/сетевые ошибки, триггер компакции,
+идемпотентный Stop (реальный двойной task.cancel), finishReason×20,
+write-runtime merge×19, grant-null×3, model-override×2, memory PATCH×10,
+/chats label×6, пагинация (typecheck+build).
+
+**Гейты после фиксов:** pytest 567 passed / 0 skip; ruff, mypy (157 файлов),
+tsc, npm build — exit 0; TC-import-детектор — чист.
+
+## Открытые пункты после раунда 4
+
+1. **P2-бэклог** (~30 позиций в round4-отчётах; приоритет: truncation посреди
+   SOURCES; IPv6-Host; компактор на env-снимке (context_keep_recent/min_segment
+   не из DB); FTS bind-параметр ≠ GIN-выражение; chats.py PATCH не проверяет
+   model_overrides; set_enabled провайдера недостижим из API; статусные тона
+   админки; tier-downgrade; пустой flush; UTF-16 длины; мутабельные фейки).
+2. **Дыры покрытия** (рекомендации round4-qa): import-smoke в CI, wiring-тест
+   main(), direct-call тесты хендлеров, happy-path generate(), Docker build в CI,
+   healthcheck на /ready.
+3. Live-проверки (Telegram tiers, VPS SIGTERM, Gemini/Alibaba live, PG
+   barrier-тесты, frontend E2E) — не прогонялись; PostgreSQL-инварианты
+   проверены статически.
+4. Kimi DTL — optional по ТЗ §25.
+
+**Вердикт раунда 4:** 12/12 P1 закрыты (код+тесты, часть подтверждена
+«упало-до-фикса» прогонами против старых ревизий); P0-класс отсутствует;
+деплой обновлён. Оставшиеся P2 задокументированы и не блокируют эксплуатацию.

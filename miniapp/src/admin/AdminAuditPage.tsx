@@ -4,8 +4,6 @@ import { useAudit } from "../api/hooks";
 import { Button, EmptyState, Input, Section, Spinner } from "../components";
 import { formatDateTime } from "../utils";
 
-const PAGE_SIZE = 50;
-
 function metadataPreview(metadata: unknown): string {
   if (metadata === null || metadata === undefined) return "—";
   try {
@@ -19,19 +17,15 @@ function metadataPreview(metadata: unknown): string {
 export function AdminAuditPage() {
   const [action, setAction] = useState("");
   const [debouncedAction, setDebouncedAction] = useState("");
-  const [limit, setLimit] = useState(PAGE_SIZE);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedAction(action.trim()), 300);
     return () => clearTimeout(t);
   }, [action]);
 
-  // При смене фильтра начинаем с первой страницы.
-  useEffect(() => {
-    setLimit(PAGE_SIZE);
-  }, [debouncedAction]);
-
-  const auditQ = useAudit({ limit, action: debouncedAction || undefined });
+  // round4-P1: offset-пагинация — смена фильтра меняет queryKey и автоматически
+  // сбрасывает догрузку на первую страницу (setLimit больше не нужен).
+  const auditQ = useAudit({ action: debouncedAction });
 
   if (auditQ.isLoading) {
     return (
@@ -41,7 +35,8 @@ export function AdminAuditPage() {
     );
   }
 
-  if (auditQ.error) {
+  // Ошибка без данных — экран ошибки; при наличии накопленных страниц список не стираем.
+  if (auditQ.error && !auditQ.data) {
     return (
       <div className="page">
         <EmptyState icon="⚠️" text={errorMessage(auditQ.error)} />
@@ -49,9 +44,10 @@ export function AdminAuditPage() {
     );
   }
 
-  const entries = auditQ.data?.entries ?? [];
-  const total = auditQ.data?.total ?? entries.length;
-  const hasMore = entries.length < total;
+  const pages = auditQ.data?.pages ?? [];
+  const entries = pages.flatMap((p) => p.entries);
+  const total = pages.length > 0 ? pages[pages.length - 1].total : entries.length;
+  const hasMore = auditQ.hasNextPage ?? false;
 
   return (
     <div className="page">
@@ -71,6 +67,12 @@ export function AdminAuditPage() {
       </div>
 
       {entries.length === 0 && <EmptyState icon="📋" text="Событий пока нет." />}
+
+      {auditQ.error && entries.length > 0 && (
+        <div className="error-text" style={{ padding: 12 }}>
+          {errorMessage(auditQ.error)}
+        </div>
+      )}
 
       {entries.length > 0 && (
         <Section>
@@ -108,8 +110,8 @@ export function AdminAuditPage() {
               <Button
                 size="small"
                 variant="secondary"
-                loading={auditQ.isFetching}
-                onClick={() => setLimit((v) => v + PAGE_SIZE)}
+                loading={auditQ.isFetchingNextPage}
+                onClick={() => void auditQ.fetchNextPage()}
               >
                 Загрузить ещё ({entries.length} из {total})
               </Button>

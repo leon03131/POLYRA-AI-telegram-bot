@@ -12,6 +12,7 @@ import pytest
 from app.llm.base import LLMRequest, LLMTool
 from app.llm.errors import (
     AuthError,
+    ErrorCategory,
     ForbiddenError,
     InvalidRequestError,
     ProviderError,
@@ -145,6 +146,127 @@ async def test_prompt_feedback_block_reason_raises() -> None:
     body = _sse({"promptFeedback": {"blockReason": "SAFETY"}})
     with pytest.raises(SafetyError):
         await _collect(_provider_for(body), _request())
+
+
+# --- round4-P1: терминальная классификация finishReason ----------------------
+# Категории, по которым пул делает bounded retry/ротацию (pool.py
+# _RETRY_SAME_PROJECT); терминальная ошибка finishReason обязана быть вне
+# этого набора, иначе здоровый проект получает cooldown и повторный запрос.
+_RETRYABLE_CATEGORIES = frozenset(
+    {ErrorCategory.SERVER, ErrorCategory.NETWORK, ErrorCategory.TIMEOUT}
+)
+
+
+async def test_finish_reason_recitation_raises_safety_not_network() -> None:
+    """RECITATION (процитированный контент) — safety-класс, НЕ NetworkError.
+
+    Репро round4-F1: раньше RECITATION не маппился → «unexpected EOF» →
+    NetworkError → ложный bounded retry/ротация здорового проекта.
+    """
+    body = _sse(
+        {"candidates": [{"content": {"parts": [{"text": "quoted"}]}, "finishReason": "RECITATION"}]}
+    )
+    with pytest.raises(SafetyError) as exc_info:
+        await _collect(_provider_for(body), _request())
+    assert exc_info.value.category == ErrorCategory.SAFETY
+    assert exc_info.value.category not in _RETRYABLE_CATEGORIES
+    assert exc_info.value.retryable is False
+    assert exc_info.value.raw_code == "RECITATION"
+    # Детали finishReason обязаны попадать в лог (generation.py логирует str(exc)).
+    assert "RECITATION" in str(exc_info.value)
+
+
+async def test_finish_reason_malformed_function_call_invalid_request() -> None:
+    """MALFORMED_FUNCTION_CALL — invalid_request: без retry и ротации ключей."""
+    body = _sse(
+        {"candidates": [{"content": {"parts": []}, "finishReason": "MALFORMED_FUNCTION_CALL"}]}
+    )
+    with pytest.raises(InvalidRequestError) as exc_info:
+        await _collect(_provider_for(body), _request())
+    assert exc_info.value.category == ErrorCategory.INVALID_REQUEST
+    assert exc_info.value.category not in _RETRYABLE_CATEGORIES
+    assert exc_info.value.retryable is False
+    assert exc_info.value.raw_code == "MALFORMED_FUNCTION_CALL"
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "SAFETY",
+        "BLOCKLIST",
+        "PROHIBITED_CONTENT",
+        "SPII",
+        "RECITATION",
+        "LANGUAGE",
+        "IMAGE_SAFETY",
+        "IMAGE_PROHIBITED_CONTENT",
+        "IMAGE_RECITATION",
+    ],
+)
+async def test_finish_reason_safety_class_raises_safety(reason: str) -> None:
+    """Safety-класс finishReason → SafetyError с raw_code (без ротации пула)."""
+    body = _sse({"candidates": [{"content": {"parts": []}, "finishReason": reason}]})
+    with pytest.raises(SafetyError) as exc_info:
+        await _collect(_provider_for(body), _request())
+    assert exc_info.value.category == ErrorCategory.SAFETY
+    assert exc_info.value.category not in _RETRYABLE_CATEGORIES
+    assert exc_info.value.retryable is False
+    assert exc_info.value.raw_code == reason
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "OTHER",
+        "UNEXPECTED_TOOL_CALL",
+        "TOO_MANY_TOOL_CALLS",
+        "NO_IMAGE",
+        "IMAGE_OTHER",
+        "FINISH_REASON_UNSPECIFIED",
+        "SOME_FUTURE_REASON",
+    ],
+)
+async def test_finish_reason_unmapped_terminal_safety_fallback(reason: str) -> None:
+    """Немаппированный finishReason — терминальная SafetyError, НЕ «unexpected EOF».
+
+    Значения из enum SDK, не вошедшие в safety/invalid/Done-маппинги, и вообще
+    неизвестные строки (будущие версии API) обязаны давать терминальную
+    ошибку safety-категории: пул поднимает её сразу — без NetworkError,
+    bounded retry и ротации проекта.
+    """
+    body = _sse({"candidates": [{"content": {"parts": []}, "finishReason": reason}]})
+    with pytest.raises(SafetyError) as exc_info:
+        await _collect(_provider_for(body), _request())
+    assert exc_info.value.category == ErrorCategory.SAFETY
+    assert exc_info.value.category not in _RETRYABLE_CATEGORIES
+    assert exc_info.value.retryable is False
+    assert exc_info.value.raw_code == reason
+    assert reason in str(exc_info.value)
+
+
+async def test_unmapped_finish_reason_error_raised_at_terminal_position() -> None:
+    """События до немаппированного finishReason доходят; ошибка — в терминальной
+    позиции (не EOF): пользователь видит классифицированную ошибку, а не обрыв."""
+    body = _sse(
+        {"candidates": [{"content": {"parts": [{"text": "partial"}]}}]},
+        {"candidates": [{"content": {"parts": []}, "finishReason": "OTHER"}]},
+    )
+    events: list[Any] = []
+    with pytest.raises(SafetyError) as exc_info:
+        async for event in _provider_for(body).stream_chat(_request()):
+            events.append(event)
+    assert events == [TextDelta("partial")]
+    assert exc_info.value.raw_code == "OTHER"
+
+
+async def test_non_string_finish_reason_classified_not_type_error() -> None:
+    """Нехешируемый finishReason (кривой прокси) — SafetyError, не TypeError."""
+    body = _sse({"candidates": [{"content": {"parts": []}, "finishReason": {"weird": 1}}]})
+    with pytest.raises(SafetyError) as exc_info:
+        await _collect(_provider_for(body), _request())
+    assert exc_info.value.category == ErrorCategory.SAFETY
+    assert exc_info.value.category not in _RETRYABLE_CATEGORIES
+    assert exc_info.value.retryable is False
 
 
 async def test_missing_api_key_raises() -> None:

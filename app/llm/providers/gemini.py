@@ -5,6 +5,12 @@ Wire: POST {base_url}/v1beta/models/{model}:streamGenerateContent?alt=sse,
 
 Один вызов = одна попытка: ротация ключей/квоты — НЕ здесь (milestone M4),
 ошибки поднимаются наверх как app.llm.errors.ProviderError.
+
+Классификация finishReason терминальна (round4-P1): любое значение даёт
+Done (STOP/MAX_TOKENS) либо ProviderError БЕЗ network-категории
+(safety-класс и неизвестные → SafetyError, MALFORMED_FUNCTION_CALL →
+InvalidRequestError). «unexpected EOF» остаётся только для потока,
+реально оборвавшегося без finishReason.
 """
 
 from __future__ import annotations
@@ -31,7 +37,25 @@ from app.llm.events import Done, LLMEvent, ReasoningDelta, TextDelta, ToolCall, 
 logger = logging.getLogger(__name__)
 
 _FINISH_REASON_MAP = {"STOP": "stop", "MAX_TOKENS": "length"}
-_SAFETY_FINISH_REASONS = frozenset({"SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"})
+# round4-P1: safety-класс — контент/язык/цитирование отклонены фильтрами
+# Google (RECITATION — процитированный контент, IMAGE_* — image-фильтры).
+# Пул поднимает SafetyError сразу: без retry, ротации и cooldown проекта.
+_SAFETY_FINISH_REASONS = frozenset(
+    {
+        "SAFETY",
+        "BLOCKLIST",
+        "PROHIBITED_CONTENT",
+        "SPII",
+        "RECITATION",
+        "LANGUAGE",
+        "IMAGE_SAFETY",
+        "IMAGE_PROHIBITED_CONTENT",
+        "IMAGE_RECITATION",
+    }
+)
+# round4-P1: модель сломала контракт function calling — ретраи/ротация
+# ключей бессмысленны (детерминировано контекстом), категория 400-класса.
+_INVALID_REQUEST_FINISH_REASONS = frozenset({"MALFORMED_FUNCTION_CALL"})
 _TOOL_CHOICE_MODE = {"auto": "AUTO", "none": "NONE"}
 _MAX_ERROR_MESSAGE = 500
 
@@ -187,13 +211,37 @@ def _events_from_part(part: dict[str, Any]) -> list[LLMEvent]:
 
 
 def _finish_reason_event(candidate: dict[str, Any]) -> list[LLMEvent]:
+    """finishReason → терминальный исход; «пустых» веток быть не может (round4-P1).
+
+    Раньше немаппированное значение (RECITATION/OTHER/…) возвращало [] →
+    стрим «завершался» без Done → NetworkError «unexpected EOF» → пул делал
+    bounded retry/ротацию/transient-cooldown ЗДОРОВОГО проекта. Теперь любое
+    значение терминально: STOP/MAX_TOKENS → Done, safety-класс → SafetyError,
+    MALFORMED_FUNCTION_CALL → InvalidRequestError, прочие неизвестные →
+    SafetyError-fallback (без network-категории и без ротации — см. pool.py
+    stream_with_failover: SAFETY/INVALID_REQUEST поднимаются сразу).
+    """
     finish_reason = candidate.get("finishReason")
     if not finish_reason:
         return []
-    if finish_reason in _SAFETY_FINISH_REASONS:
-        raise SafetyError(f"gemini finishReason={finish_reason}", raw_code=str(finish_reason))
-    mapped = _FINISH_REASON_MAP.get(finish_reason)
-    return [Done(finish_reason=mapped)] if mapped else []
+    # Не-строка из кривого прокси: str() до membership-проверки — иначе
+    # нехешируемое значение упадёт TypeError'ом вне классификации.
+    reason = str(finish_reason)
+    if reason in _SAFETY_FINISH_REASONS:
+        raise SafetyError(f"gemini finishReason={reason}", raw_code=reason)
+    if reason in _INVALID_REQUEST_FINISH_REASONS:
+        raise InvalidRequestError(f"gemini finishReason={reason}", raw_code=reason)
+    mapped = _FINISH_REASON_MAP.get(reason)
+    if mapped is not None:
+        return [Done(finish_reason=mapped)]
+    # Неизвестное значение (OTHER/UNEXPECTED_TOOL_CALL/новые из будущих версий
+    # API): консервативно SafetyError-подобное поведение БЕЗ ротации ключей —
+    # это НЕ сетевой обрыв, ретраить/ротировать проект нельзя.
+    logger.warning(
+        "gemini: немаппированный finishReason=%s — терминальная SafetyError без ротации",
+        reason,
+    )
+    raise SafetyError(f"gemini unmapped finishReason={reason}", raw_code=reason)
 
 
 def _events_from_chunk(chunk: dict[str, Any]) -> list[LLMEvent]:

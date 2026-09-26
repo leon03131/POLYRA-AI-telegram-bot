@@ -27,6 +27,10 @@ router = Router(name="commands")
 
 _OPEN_CHAT_PREFIX = "chat:open:"
 
+# round4-P1: Bot API требует InlineKeyboardButton.text из 1-64 символов.
+_CHAT_BUTTON_TEXT_LIMIT = 64
+_NO_TITLE_LABEL = "Без названия"
+
 
 def build_admin_url(app_base_url: str) -> str:
     """URL админ-панели Mini App. Frontend — HashRouter → hash route /#/admin (A02)."""
@@ -46,6 +50,23 @@ def parse_open_chat_callback(data: str) -> uuid.UUID | None:
         return uuid.UUID(data.removeprefix(_OPEN_CHAT_PREFIX))
     except ValueError:
         return None
+
+
+def _chat_button_label(title: str | None, date_str: str, marker: str = "") -> str:
+    """Текст кнопки чата в /chats: «маркер + название · дата», целиком не длиннее 64 символов.
+
+    round4-P1: chat.title приходит из Mini App (Field(max_length=256), без
+    санитизации) — «сырой» title превышал лимит InlineKeyboardButton.text и
+    ломал команду /chats целиком (TelegramBadRequest). Длинное название
+    режется с «…», дата и маркер текущего чата сохраняются; лимит считается
+    по символам (len), как в Bot API.
+    """
+    name = title or _NO_TITLE_LABEL
+    suffix = f" · {date_str}"
+    budget = _CHAT_BUTTON_TEXT_LIMIT - len(marker) - len(suffix)
+    if len(name) <= budget:
+        return f"{marker}{name}{suffix}"
+    return f"{marker}{name[: max(budget - 1, 0)].rstrip()}…{suffix}"
 
 
 @router.message(CommandStart())
@@ -111,7 +132,8 @@ async def _send_chats_list(message: Message, service: ChatService, user: User) -
     buttons = []
     for chat in chats:
         marker = "✅ " if chat.id == current_id else ""
-        label = f"{marker}{chat.title or 'Без названия'} · {chat.created_at:%d.%m.%Y}"
+        # round4-P1: label с гарантией ≤64 символов (раньше TelegramBadRequest).
+        label = _chat_button_label(chat.title, f"{chat.created_at:%d.%m.%Y}", marker)
         buttons.append(
             [InlineKeyboardButton(text=label, callback_data=build_open_chat_callback(chat.id))]
         )
@@ -137,7 +159,11 @@ async def open_chat(
         await session.commit()
     await callback.answer("Чат выбран")
     if isinstance(callback.message, Message):
-        await callback.message.answer(f"Открыт чат: {chat.title or 'Без названия'}")
+        # round4-P2: parse_mode=None — у бота default HTML (dispatcher), а title
+        # из Mini App не экранирован: '<' или незакрытый тег давали BadRequest.
+        await callback.message.answer(
+            f"Открыт чат: {chat.title or _NO_TITLE_LABEL}", parse_mode=None
+        )
 
 
 @router.message(Command("settings"))

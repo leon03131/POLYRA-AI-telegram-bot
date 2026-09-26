@@ -19,7 +19,10 @@ check fail (skipped за fail НЕ считается); 130 — KeyboardInterrup
 С --write-runtime дополнительно пишется runtime capability store (A27): по
 каждой модели с результатами — запись system_settings[capability_probe:<id>]
 (accepted_thinking/text_ok/at/endpoint), читается GET /api/models. Модели без
-результатов (skipped/not run) не трогаются — старые доказательства не затираются.
+результатов (skipped/not run) не трогаются. Записываемое значение MERGE-ится
+с прежней записью (N03): режим/text_ok убирает только свежий негативный
+вердикт провайдера (400 invalid → kind=rejected), а transient-сбой
+(429/timeout/5xx/network → kind=transient) прежнее доказательство сохраняет.
 
 Списки моделей — НЕ hardcoded, а enumeration из ModelRegistry (default_registry):
 новые модели попадают в прогон автоматически; internal_only помечаются в notes.
@@ -54,7 +57,7 @@ from app.db.repositories import GeminiProjectRepository, SystemSettingRepository
 from app.db.session import create_engine_from_url, make_session_factory  # noqa: E402
 from app.llm.base import LLMProvider, LLMRequest, LLMTool, MessageDict  # noqa: E402
 from app.llm.capabilities import THINKING_OFF, ModelDefinition  # noqa: E402
-from app.llm.errors import InvalidRequestError, ProviderError  # noqa: E402
+from app.llm.errors import ErrorCategory, InvalidRequestError, ProviderError  # noqa: E402
 from app.llm.events import Done, ReasoningDelta, TextDelta, ToolCall, Usage  # noqa: E402
 from app.llm.gemini.pool import PoolExhaustedError  # noqa: E402
 from app.llm.providers.alibaba import AlibabaProvider  # noqa: E402
@@ -85,7 +88,12 @@ _ECHO_TOOL = LLMTool(
     },
 )
 
-CheckResult = dict[str, str]  # {"status": "ok" | "fail" | "skipped", "detail": str}
+CheckResult = dict[str, str]  # {"status": "ok"|"fail"|"skipped", "detail": str}
+
+# Классификация fail для runtime capability-merge (N03/A27): transient —
+# «не смогли проверить», НЕ вердикт о параметре → прежнее evidence сохраняется.
+_KIND_REJECTED = "rejected"  # провайдер явно отверг параметр (400/404 invalid_request)
+_KIND_TRANSIENT = "transient"  # 429/5xx/timeout/network/auth/... — без вердикта
 
 
 def _registry_models(registry: ModelRegistry, provider: str) -> list[ModelDefinition]:
@@ -97,8 +105,30 @@ def _ok(detail: str) -> CheckResult:
     return {"status": "ok", "detail": detail}
 
 
-def _fail(detail: str) -> CheckResult:
-    return {"status": "fail", "detail": detail}
+def _fail(detail: str, *, kind: str | None = None) -> CheckResult:
+    """fail с классификацией для capability-merge.
+
+    kind="rejected" — провайдер явно отверг параметр (свежий негативный
+    вердикт, прежнее evidence убирается); kind="transient" — 429/5xx/timeout/
+    network (вердикта нет, прежнее evidence сохраняется); без kind —
+    функциональный сбой (стрим прошёл, но ожидаемые события не сошлись).
+    """
+    result: CheckResult = {"status": "fail", "detail": detail}
+    if kind is not None:
+        result["kind"] = kind
+    return result
+
+
+def _provider_error_kind(exc: ProviderError) -> str:
+    """Классификация ProviderError для capability-merge (N03).
+
+    rejected — invalid_request (провайдер отверг запрос/параметр);
+    всё остальное (rate_limit/server/network/timeout/auth/...) — transient:
+    параметр НЕ отвергнут, проверить не удалось — старое evidence не стираем.
+    """
+    if exc.category == ErrorCategory.INVALID_REQUEST:
+        return _KIND_REJECTED
+    return _KIND_TRANSIENT
 
 
 def _skip(detail: str) -> CheckResult:
@@ -182,11 +212,15 @@ async def _run_check(
     try:
         checks[name] = await coro
     except PoolExhaustedError as exc:
-        checks[name] = _fail(f"pool exhausted: {exc}")
+        # локальная квота пула — вердикта о параметре нет, старое не стираем
+        checks[name] = _fail(f"pool exhausted: {exc}", kind=_KIND_TRANSIENT)
     except ProviderError as exc:
-        checks[name] = _fail(_format_provider_error(exc))
+        checks[name] = _fail(_format_provider_error(exc), kind=_provider_error_kind(exc))
     except Exception as exc:  # probe обязан пережить любой сбой одного check
-        checks[name] = _fail(f"unexpected {type(exc).__name__}: {str(exc)[:200]}")
+        # внутренняя ошибка probe/парсинга — вердикта о параметре нет (N03)
+        checks[name] = _fail(
+            f"unexpected {type(exc).__name__}: {str(exc)[:200]}", kind=_KIND_TRANSIENT
+        )
     logger.info("%s -> %s", name, checks[name]["status"])
 
 
@@ -240,7 +274,7 @@ async def _check_thinking_level(
     try:
         summary = await _collect(provider, request)
     except InvalidRequestError as exc:
-        return _fail(f"rejected: {_format_provider_error(exc)}")
+        return _fail(f"rejected: {_format_provider_error(exc)}", kind=_KIND_REJECTED)
     reasoning = (
         f"ReasoningDelta x{summary.reasoning_deltas}"
         if summary.reasoning_deltas
@@ -541,20 +575,23 @@ def _alibaba_recommendations(report: dict[str, Any], registry: ModelRegistry) ->
             detail = str(text_check.get("detail", ""))[:60]
             lines.append(f"{model}: базовый запрос fail ({detail}) — уровни не оценены")
             continue
-        accepted = [
-            level
-            for level in definition.thinking_modes
-            if (checks.get(f"thinking:{level}") or {}).get("status") == "ok"
-        ]
-        rejected = [
-            level
-            for level in definition.thinking_modes
-            if (checks.get(f"thinking:{level}") or {}).get("status") == "fail"
-        ]
+        accepted: list[str] = []
+        rejected: list[str] = []
+        transient: list[str] = []
+        for level in definition.thinking_modes:
+            check = checks.get(f"thinking:{level}") or {}
+            if check.get("status") == "ok":
+                accepted.append(level)
+            elif check.get("kind") == _KIND_TRANSIENT:
+                transient.append(level)  # сбой probe, НЕ вердикт провайдера
+            elif check.get("status") == "fail":
+                rejected.append(level)
         line = (
             f"{model}: показывать [{', '.join(accepted) or '—'}]; "
             f"отклонены [{', '.join(rejected) or '—'}]"
         )
+        if transient:
+            line += f"; не оценены из-за transient-сбоя [{', '.join(transient)}]"
         if THINKING_OFF in definition.thinking_modes:
             verdict = "принят" if THINKING_OFF in accepted else "НЕ принят — скрыть из UI"
             line += f"; OFF {verdict}"
@@ -612,11 +649,53 @@ def _write_report(report: dict[str, Any]) -> Path:
 _RUNTIME_ENDPOINTS = {"gemini": "gemini-proxy", "alibaba": "alibaba"}
 
 
-def _runtime_entries(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Записи capability_probe для моделей с результатами probe.
+def _clean_modes(value: Any) -> list[str]:
+    """Валидация списка режимов (возможно битой старой записи): только строки."""
+    if not isinstance(value, list):
+        return []
+    return [mode for mode in value if isinstance(mode, str)]
 
-    accepted_thinking — уровни из checks "thinking:<level>" со status ok
-    ("off" включается наравне с остальными, если был проверен и ok).
+
+def _mode_verdicts(checks: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """(accepted, rejected) thinking-режимов по чекам "thinking:<level>".
+
+    ok → accepted; fail с негативным вердиктом (kind=rejected или функциональный
+    fail без kind) → rejected; fail+transient и skipped — вердикта нет (режим
+    не попадает ни в один список, merge оставит прежнее состояние).
+    """
+    accepted: list[str] = []
+    rejected: list[str] = []
+    for name, check in checks.items():
+        if not name.startswith("thinking:") or not isinstance(check, dict):
+            continue
+        mode = name.removeprefix("thinking:")
+        status = check.get("status")
+        if status == "ok":
+            accepted.append(mode)
+        elif status == "fail" and check.get("kind") != _KIND_TRANSIENT:
+            rejected.append(mode)
+    return accepted, rejected
+
+
+def _text_verdict(checks: dict[str, Any]) -> bool | None:
+    """Вердикт text_stream-чека: True/False; None — вердикта нет (transient)."""
+    check = checks.get("text_stream")
+    if not isinstance(check, dict):
+        return None
+    if check.get("status") == "ok":
+        return True
+    if check.get("status") == "fail" and check.get("kind") != _KIND_TRANSIENT:
+        return False
+    return None
+
+
+def _runtime_entries(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Свежие probe-вердикты для моделей с результатами (вход _merge_runtime_entry).
+
+    Формат (ПРОМЕЖУТОЧНЫЙ, не итоговая запись): accepted_thinking — режимы со
+    свежим ok; rejected_thinking — режимы с негативным вердиктом (rejected или
+    функциональный fail); text_ok — True/False либо None, если text-чек не дал
+    вердикта (transient-сбой); at/endpoint — штамп/эндпоинт прогона.
     Модели без результатов (skipped/not run, секция провайдера не ok) сюда не
     попадают — их старые записи в system_settings НЕ затираются.
     """
@@ -627,23 +706,61 @@ def _runtime_entries(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
         if not isinstance(section, dict) or section.get("status") != "ok":
             continue
         for model_id, model_report in (section.get("models") or {}).items():
+            if not isinstance(model_report, dict):
+                continue
             checks = model_report.get("checks") or {}
-            accepted = [
-                name.removeprefix("thinking:")
-                for name, check in checks.items()
-                if name.startswith("thinking:") and check.get("status") == "ok"
-            ]
+            accepted, rejected = _mode_verdicts(checks)
             entries[model_id] = {
                 "accepted_thinking": accepted,
-                "text_ok": (checks.get("text_stream") or {}).get("status") == "ok",
+                "rejected_thinking": rejected,
+                "text_ok": _text_verdict(checks),
                 "at": stamped_at,
                 "endpoint": endpoint,
             }
     return entries
 
 
+def _merge_runtime_entry(old: dict[str, Any] | None, new: dict[str, Any]) -> dict[str, Any]:
+    """Слить свежий probe-вердикт (new) с прежней записью (old) — N03/A27.
+
+    Семантика (итог — запись для system_settings, формат как раньше):
+    - режим со свежим ok → в accepted_thinking;
+    - режим со свежим негативным вердиктом (rejected/функциональный fail) → убран;
+    - режим с transient-сбоем или без свежего вердикта → как в old (сохраняется);
+    - old нет/битый → только свежие ok-вердикты (поведение до merge);
+    - text_ok: transient-сбой (None) не сбрасывает прежний true, битый old → False;
+    - at/endpoint — из new (свежесть записи обновляется).
+    """
+    fresh_ok = _clean_modes(new.get("accepted_thinking"))
+    fresh_rejected = set(_clean_modes(new.get("rejected_thinking")))
+    old_accepted = _clean_modes(old.get("accepted_thinking")) if old is not None else []
+    merged = [mode for mode in old_accepted if mode not in fresh_rejected]
+    seen = set(merged)
+    for mode in fresh_ok:
+        if mode not in seen:
+            merged.append(mode)
+            seen.add(mode)
+    fresh_text = new.get("text_ok")
+    if fresh_text is None:
+        # transient/не проверен — прежнее значение; битый old → False
+        old_text = old.get("text_ok") if old is not None else None
+        text_ok = old_text if isinstance(old_text, bool) else False
+    else:
+        text_ok = fresh_text
+    return {
+        "accepted_thinking": merged,
+        "text_ok": text_ok,
+        "at": str(new.get("at", "")),
+        "endpoint": str(new.get("endpoint", "")),
+    }
+
+
 async def _write_runtime(report: dict[str, Any]) -> int:
     """Upsert записей capability_probe:<model_id> в system_settings.
+
+    Перед записью читаются прежние записи (той же сессией) и сливаются через
+    _merge_runtime_entry — transient-сбой probe НЕ стирает подтверждённые
+    ранее режимы/text_ok (N03/A27); убирает только свежий негативный вердикт.
 
     Возвращает число записанных моделей; 0 — нечего писать или БД недоступна
     (probe не должен падать из-за этого, только warning).
@@ -656,7 +773,13 @@ async def _write_runtime(report: dict[str, Any]) -> int:
         session_factory = make_session_factory(engine)
         async with session_factory() as session:
             repo = SystemSettingRepository(session)
-            for model_id, value in entries.items():
+            keys = [f"{CAPABILITY_PREFIX}{model_id}" for model_id in entries]
+            old_values = await repo.get_many(keys)
+            for model_id, fresh in entries.items():
+                old = old_values.get(f"{CAPABILITY_PREFIX}{model_id}")
+                if not isinstance(old, dict):
+                    old = None
+                value = _merge_runtime_entry(old, fresh)
                 await repo.set_value(f"{CAPABILITY_PREFIX}{model_id}", value)
             await session.commit()
     except Exception as exc:
@@ -712,7 +835,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--write-runtime",
         action="store_true",
         help="записать результаты в system_settings (capability_probe:<model_id>) "
-        "для runtime-фильтрации GET /api/models (A27)",
+        "для runtime-фильтрации GET /api/models (A27); merge с прежними записями — "
+        "transient-сбои (429/timeout/5xx) не стирают подтверждённые режимы (N03)",
     )
     return parser.parse_args(argv)
 

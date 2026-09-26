@@ -98,8 +98,15 @@ async def grant_access(
     """Выдать/обновить грант (status=active); пользователь создаётся при отсутствии.
 
     Семантика опциональных полей (A26): UNSET (не передано) — колонку не
-    трогаем; explicit None — записать NULL (снять лимит / permanent).
-    Новый грант: непереданные поля получают дефолты колонок (лимиты NULL).
+    трогаем; explicit None — записать NULL (снять лимит / permanent) — это
+    семантика ТОЛЬКО nullable-колонок (expires_at, requests_per_day,
+    token_limit, note). Новый грант: непереданные поля получают дефолты
+    колонок (лимиты NULL).
+
+    round4-P1: max_concurrent_generations / can_use_web_search /
+    can_use_memory — NOT NULL-колонки (models/access.py); явный None здесь
+    не «снимает значение», а ломает flush (NotNullViolation → 500).
+    Отклоняем ValueError'ом до обращения к БД (роут маппит его в 400).
     """
     # A26: bounds для числовых лимитов — отрицательные/нулевые отклоняются.
     for field_name, value in (
@@ -109,6 +116,14 @@ async def grant_access(
     ):
         if value is not UNSET and value is not None and value <= 0:
             raise ValueError(f"{field_name} must be positive")
+    # round4-P1: NOT NULL-колонки — явный null невалиден (не nullable-семантика).
+    for field_name, value in (
+        ("max_concurrent_generations", max_concurrent_generations),
+        ("can_use_web_search", can_use_web_search),
+        ("can_use_memory", can_use_memory),
+    ):
+        if value is not UNSET and value is None:
+            raise ValueError(f"{field_name} cannot be null")
     user = await _get_or_create_user(session, telegram_user_id)
     repo = AccessRepository(session)
     provided: dict[str, Any] = {

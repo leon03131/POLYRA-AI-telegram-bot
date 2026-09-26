@@ -189,19 +189,35 @@ export function useSystemSettings() {
   return useQuery({ queryKey: qk.system, queryFn: () => api<SystemSettings>("/api/admin/system") });
 }
 
+export const AUDIT_PAGE_SIZE = 50;
+
 export interface AuditParams {
-  limit?: number;
-  offset?: number;
   action?: string;
 }
 
+/**
+ * Audit-лог (admin) с offset-пагинацией (см. useChats).
+ * round4-P1: backend ограничивает limit cap'ом 500 (admin_stats.py
+ * _MAX_AUDIT_LIMIT), поэтому догрузка идёт offset'ом, а не ростом limit —
+ * иначе после cap hasMore оставался true навсегда, а записи 501+ были недостижимы.
+ */
 export function useAudit(params: AuditParams = {}) {
-  const { limit = 50, offset = 0, action = "" } = params;
-  const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-  if (action) qs.set("action", action);
-  return useQuery({
-    queryKey: [...qk.audit, { limit, offset, action }] as const,
-    queryFn: () => api<AuditResponse>(`/api/admin/audit?${qs.toString()}`),
+  const { action = "" } = params;
+  return useInfiniteQuery({
+    queryKey: [...qk.audit, "list", { action }] as const,
+    queryFn: ({ pageParam }) => {
+      const qs = new URLSearchParams({
+        limit: String(AUDIT_PAGE_SIZE),
+        offset: String(pageParam),
+      });
+      if (action) qs.set("action", action);
+      return api<AuditResponse>(`/api/admin/audit?${qs.toString()}`);
+    },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((sum, p) => sum + p.entries.length, 0);
+      return loaded < lastPage.total ? loaded : undefined;
+    },
   });
 }
 
@@ -222,18 +238,34 @@ export function useGeminiUsage(enabled = true) {
   });
 }
 
+export const ADMIN_MEMORIES_PAGE_SIZE = 50;
+
 export interface AdminMemoriesParams {
   telegram_user_id?: number | null;
-  limit?: number;
-  offset?: number;
 }
 
+/**
+ * Память пользователей (admin) с offset-пагинацией (см. useChats).
+ * round4-P1: backend ограничивает limit cap'ом 200 (admin_memory.py
+ * _MAX_LIMIT), поэтому догрузка идёт offset'ом, а не ростом limit —
+ * иначе после cap hasMore оставался true навсегда.
+ */
 export function useAdminMemories(params: AdminMemoriesParams = {}) {
-  const { telegram_user_id = null, limit = 50, offset = 0 } = params;
-  const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-  if (telegram_user_id !== null) qs.set("telegram_user_id", String(telegram_user_id));
-  return useQuery({
-    queryKey: [...qk.adminMemory, { telegram_user_id, limit, offset }] as const,
-    queryFn: () => api<AdminMemoriesResponse>(`/api/admin/memory?${qs.toString()}`),
+  const { telegram_user_id = null } = params;
+  return useInfiniteQuery({
+    queryKey: [...qk.adminMemory, "list", { telegram_user_id }] as const,
+    queryFn: ({ pageParam }) => {
+      const qs = new URLSearchParams({
+        limit: String(ADMIN_MEMORIES_PAGE_SIZE),
+        offset: String(pageParam),
+      });
+      if (telegram_user_id !== null) qs.set("telegram_user_id", String(telegram_user_id));
+      return api<AdminMemoriesResponse>(`/api/admin/memory?${qs.toString()}`);
+    },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((sum, p) => sum + p.memories.length, 0);
+      return loaded < lastPage.total ? loaded : undefined;
+    },
   });
 }

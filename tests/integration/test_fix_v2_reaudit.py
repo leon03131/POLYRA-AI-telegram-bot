@@ -10,6 +10,9 @@ Offline, без сети и БД: фейковый LLM-стрим по сцен�
   «висящих» tool_call без tool_result (400 у strict-провайдеров).
 - A15: при наличии сводки только что записанное user-сообщение не
   дублируется в контексте (list_all фильтрует его; current идёт отдельно).
+- round4-P1 (GLM): A32-заголовки источников; отмена во время tool-раунда;
+  rehydrate хвост+cap+сетевые ошибки; триггер первой компакции без сводки;
+  идемпотентный Stop.
 """
 
 from __future__ import annotations
@@ -33,7 +36,13 @@ from app.llm.tools.registry import ToolDefinition, ToolRegistry
 from app.llm.tools.runner import ToolRunner
 from app.llm.tools.schemas import make_llm_tools
 from app.services.access import evaluate_access
-from app.services.generation import GenerationRegistry, GenerationService, _PreparedGeneration
+from app.services.generation import (
+    ActiveGeneration,
+    GenerationRegistry,
+    GenerationService,
+    _PreparedGeneration,
+    collect_sources,
+)
 
 _SETTINGS = Settings(default_model="gemini-3.8-flash")
 
@@ -469,3 +478,222 @@ async def test_build_context_with_summary_does_not_duplicate_current_message(
     assert "Сводка предыдущего разговора" in result[1]
     # Отказа «контекст слишком большой» не было (fits=True → бот молчит).
     assert bot.calls == []
+
+
+# --- round4-P1: A32 — заголовки источников при SOURCES-первым -------------------
+
+
+def _search_execution(content: str) -> Any:
+    """Фейк ToolExecution для collect_sources."""
+    return SimpleNamespace(result=SimpleNamespace(content=content, is_error=False))
+
+
+def test_collect_sources_prefers_list_titles_over_sources_line() -> None:
+    """round4-P1 (A32): (title, url) из нумерованного списка главнее «голых»
+    url из строки SOURCES (теперь она идёт первой, до 0be0524 дедуп по url
+    вытеснял заголовки — «Источники» теряли названия во всех ответах с поиском).
+
+    Обрезанный (частичный) URL отбрасывается (max_result_size режет хвост).
+    """
+    content = (
+        "SOURCES: https://a.com | https://b.com | https://c.com/x… [truncated]\n"
+        "\n1. Заголовок A\nhttps://a.com\nсниппет A\n\n"
+        "2. Заголовок B\nhttps://b.com\nсниппет B"
+    )
+    records = [
+        (ToolCall(id="c1", name="web_search", arguments_json="{}"), _search_execution(content))
+    ]
+
+    sources = collect_sources(records)
+
+    # Заголовки из списка, не «url вместо названия»; обрезанный URL отброшен.
+    assert sources == [
+        ("Заголовок A", "https://a.com"),
+        ("Заголовок B", "https://b.com"),
+    ]
+
+
+# --- round4-P1: отмена во время tool-раунда --------------------------------------
+
+
+async def test_cancel_during_tool_round_returns_cancelled_outcome() -> None:
+    """round4-P1: CancelledError (task.cancel из registry.stop) во время
+    исполнения tool больше не улетает из _stream_loop — цикл возвращает
+    partial-outcome со cancelled=True (раньше: partial терялся, run «running»).
+
+    До фикса: asyncio.CancelledError поднимался из _run_tool_round наружу —
+    result не возвращался вовсе (pytest ловил бы CancelledError).
+    """
+    tool_runner = SimpleNamespace()
+
+    async def execute_raising_cancel(*args: Any, **kw: Any) -> Any:
+        raise asyncio.CancelledError
+
+    tool_runner.execute = execute_raising_cancel
+
+    async def fake_stream(request: LLMRequest) -> AsyncIterator[LLMEvent]:
+        yield TextDelta("частичный ответ до tool")
+        yield ToolCall(id="call_0", name="echo", arguments_json='{"text": "q"}')
+        yield Done("tool_calls")
+
+    service = _service(fake_stream)
+
+    result = await service._stream_loop(
+        _prepared_stub(),
+        FakeStreamer(),
+        llm_tools=[],
+        tool_runner=tool_runner,
+        user=SimpleNamespace(id=uuid.uuid4()),
+        permissions=_permissions_stub(),
+        cancellation=asyncio.Event(),
+    )
+
+    assert result is not None
+    outcome, _tool_records, _attempts, _attempt_ids = result
+    assert outcome.cancelled is True
+    assert outcome.text == "частичный ответ до tool"
+
+
+# --- round4-P1: rehydrate — хвост, cap, сетевые ошибки ---------------------------
+
+
+class _RehydrateBot:
+    """Бот для _rehydrate_images: считает get_file, валится на заданных id."""
+
+    def __init__(self, fail_ids: set[str]) -> None:
+        self.get_file_calls: list[str] = []
+        self._fail_ids = fail_ids
+
+    async def get_file(self, file_id: str) -> Any:
+        self.get_file_calls.append(file_id)
+        if file_id in self._fail_ids:
+            raise RuntimeError("aiohttp ClientError: download failed")  # НЕ TelegramAPIError
+        return SimpleNamespace(file_path=f"/tmp/{file_id}", file_size=100)
+
+    async def download_file(self, path: str) -> Any:
+        return SimpleNamespace(read=lambda: b"imgdata")
+
+
+def _image_message(file_id: str) -> Any:
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        role="user",
+        parts=[SimpleNamespace(type="image", telegram_file_id=file_id)],
+    )
+
+
+async def test_rehydrate_tail_window_cap_and_network_errors() -> None:
+    """round4-P1: rehydration качает только хвост (tail_messages), не больше
+    _MAX_REHYDRATED_IMAGES, и НЕ рвёт генерацию на сетевой ошибке aiohttp
+    (раньше ловился только TelegramAPIError — генерация падала до драфта)."""
+    history = [_image_message(f"file_{i}") for i in range(30)]
+    bot = _RehydrateBot(fail_ids={"file_21"})  # ошибка внутри хвоста
+
+    service = _service()
+    await service._rehydrate_images(history, bot, uncovered_from=0, tail_messages=10)
+
+    # (a) обращались только к хвосту; cap считается по успешным загрузкам:
+    # 9 попыток (file_21 не в счёт) → file_20..file_28, file_29 не тронут.
+    assert bot.get_file_calls == [f"file_{i}" for i in range(20, 29)]
+    # (b) сетевая ошибка на file_21 не поднялась: часть осталась без bytes.
+    failed_part = history[21].parts[0]
+    assert getattr(failed_part, "data_base64", None) is None
+    # (c) cap: скачано не больше _MAX_REHYDRATED_IMAGES файлов.
+    downloaded = sum(1 for m in history[20:30] if getattr(m.parts[0], "data_base64", None))
+    assert downloaded <= generation_module._MAX_REHYDRATED_IMAGES
+    assert downloaded == 8  # cap достигнут
+    # (d) старые сообщения (file_0..file_19) и file_29 за cap не тронуты.
+    assert all(getattr(m.parts[0], "data_base64", None) is None for m in history[:20])
+    assert getattr(history[29].parts[0], "data_base64", None) is None
+
+
+async def test_rehydrate_respects_cap() -> None:
+    """round4-P1: потолок _MAX_REHYDRATED_IMAGES — не качаем всю историю фото."""
+    history = [_image_message(f"img_{i}") for i in range(20)]
+    bot = _RehydrateBot(fail_ids=set())
+
+    service = _service()
+    await service._rehydrate_images(history, bot, uncovered_from=0, tail_messages=20)
+
+    assert len(bot.get_file_calls) == generation_module._MAX_REHYDRATED_IMAGES
+
+
+# --- round4-P1: первая компакция без сводки ---------------------------------------
+
+
+async def test_no_summary_full_window_triggers_compaction(monkeypatch: Any) -> None:
+    """round4-P1 (A15): без сводки полное окно истории (recent_history_limit*2)
+    триггерит compaction — старший материал за окном больше не теряется молча."""
+    _FakeChatSummaryRepository.summary_row = None
+    monkeypatch.setattr(generation_module, "ChatSummaryRepository", _FakeChatSummaryRepository)
+
+    window = _SETTINGS.recent_history_limit * 2
+    history = [_history_message("user", f"сообщение {i}") for i in range(window)]
+    messages_repo = _FakeMessagesRepo(history)
+    service = GenerationService(
+        session_factory=None,
+        registry=default_registry(),
+        llm_stream=_empty_stream,
+        settings=_SETTINGS,
+        generation_registry=GenerationRegistry(),
+        context_builder=ContextBuilder(TokenBudgetManager()),
+    )
+
+    result = await service._build_context(
+        _FakeSession(),
+        _RecordingBot(),
+        tg_chat_id=42,
+        chat_id=uuid.uuid4(),
+        model_def=default_registry().get("gemini-3.8-flash"),
+        history=history,
+        messages_repo=messages_repo,
+        base_system_prompt="sys",
+        memories=[],
+        current_parts=[{"type": "text", "text": "вопрос"}],
+        tool_defs=[],
+        effective_settings=_SETTINGS,
+    )
+
+    assert result is not None
+    assert result[2] is True  # needs_compaction форсирован полным окном
+
+
+# --- round4-P1: идемпотентный Stop ------------------------------------------------
+
+
+async def test_stop_is_idempotent_no_double_cancel() -> None:
+    """round4-P1: повторный Stop не посылает второй task.cancel — финализация
+    partial (_save_cancelled) не рвётся (раньше второй cancel мог прервать
+    сохранение: run оставался «running», partial терялся)."""
+    registry = GenerationRegistry()
+    delivered = 0
+
+    async def worker() -> None:
+        nonlocal delivered
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            delivered += 1
+            try:
+                await asyncio.sleep(0.15)  # окно «финализации» для второго cancel
+            except asyncio.CancelledError:
+                delivered += 1  # второй cancel — баг
+
+    task = asyncio.create_task(worker())
+    registry.register(
+        ActiveGeneration(
+            task=task,
+            cancellation=asyncio.Event(),
+            draft_id=1,
+            tg_chat_id=42,
+            chat_id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+        )
+    )
+    await asyncio.sleep(0.05)
+    assert await registry.stop(42, 1) is True  # первый Stop: event + cancel
+    await asyncio.sleep(0.05)  # cancel доставлен, worker во «внутреннем» окне
+    assert await registry.stop(42, 1) is True  # повторный Stop: идемпотентно
+    await asyncio.sleep(0.3)  # окно закрылось без второго cancel
+    assert delivered == 1
+    assert not task.cancelled()

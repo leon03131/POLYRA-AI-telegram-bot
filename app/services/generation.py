@@ -110,11 +110,16 @@ class GenerationRegistry:
         return sum(1 for gen in self._by_draft.values() if gen.user_id == user_id)
 
     async def stop_all_for_user(self, user_id: uuid.UUID) -> int:
-        """Остановить все активные генерации пользователя (revoke/ban). Вернёт число."""
+        """Остановить все активные генерации пользователя (revoke/ban). Вернёт число.
+
+        round4: task.cancel тоже нужен — иначе зависшее чтение транспорта живёт
+        до общего deadline (240с), а обещание «генерации будут остановлены»
+        не выполняется фактически."""
         count = 0
         for gen in list(self._by_draft.values()):
             if gen.user_id == user_id:
                 gen.cancellation.set()
+                gen.task.cancel()
                 count += 1
         return count
 
@@ -122,10 +127,14 @@ class GenerationRegistry:
         """Отмена: cancellation event + немедленный task.cancel (A11).
 
         task.cancel прерывает даже зависшее чтение HTTP — CancelledError
-        ловится в _consume, partial сохраняется, run → cancelled."""
+        ловится в _consume, partial сохраняется, run → cancelled.
+        round4-P1: идемпотентно — повторный Stop НЕ рвёт финализацию вторым
+        cancel (иначе _save_cancelled прерывался, partial терялся)."""
         gen = self.find_by_draft(tg_chat_id, draft_id)
         if gen is None:
             return False
+        if gen.cancellation.is_set():
+            return True  # отмена уже инициирована
         gen.cancellation.set()
         gen.task.cancel()
         return True
@@ -213,6 +222,9 @@ def resolve_model_and_thinking(
 
 _SOURCES_LINE = "SOURCES:"
 
+# round4-P1: потолок закачек изображений за один запрос генерации (rehydration).
+_MAX_REHYDRATED_IMAGES = 8
+
 
 def extract_sources(tool_content: str) -> list[tuple[str, str]]:
     """Пары (title, url) из результата web_search: нумерованный список «N. title\\nURL».
@@ -239,18 +251,39 @@ def extract_sources(tool_content: str) -> list[tuple[str, str]]:
     return sources
 
 
+def _is_valid_source_url(url: str) -> bool:
+    """URL источника пережил max_result_size-обрезку и выглядит полным."""
+    return (
+        url.startswith(("http://", "https://"))
+        and "[truncated]" not in url
+        and "…" not in url
+        and not any(ch.isspace() for ch in url)
+    )
+
+
 def collect_sources(tool_records: list[tuple[ToolCall, ToolExecution]]) -> list[tuple[str, str]]:
-    """Все источники из web_search-вызовов, dedupe по url (порядок сохраняется)."""
-    seen: set[str] = set()
-    sources: list[tuple[str, str]] = []
+    """Все источники из web_search-вызовов, dedupe по url (порядок сохраняется).
+
+    round4-P1 (A32): пара (title, url) из нумерованного списка главнее
+    «голого» url из строки SOURCES: — до фикса дедуп по url оставлял (url, url),
+    и заголовки источников терялись в каждом поисковом ответе. Обрезанные
+    (частичные) URL отбрасываются.
+    """
+    titles: dict[str, str] = {}
+    order: list[str] = []
     for call, execution in tool_records:
         if call.name != "web_search" or execution.result.is_error:
             continue
         for title, url in extract_sources(execution.result.content):
-            if url not in seen:
-                seen.add(url)
-                sources.append((title, url))
-    return sources
+            if not _is_valid_source_url(url):
+                continue
+            if url in titles:
+                if titles[url] == url and title != url:
+                    titles[url] = title  # заголовок из списка заменяет голый URL
+            else:
+                titles[url] = title
+                order.append(url)
+    return [(titles[url], url) for url in order]
 
 
 def build_sources_suffix(sources: list[tuple[str, str]]) -> str:
@@ -484,6 +517,19 @@ class GenerationService:
                     attempt_ids=attempt_ids,
                 )
                 self._schedule_maintenance(prepared, final_outcome)
+        except asyncio.CancelledError:
+            # round4-P1: отмена пришла ВНЕ _consume/_stream_loop (например, Stop
+            # во время финализации или стартового draft-flush). best-effort: run
+            # не должен остаться «running» до рестарта; partial уже показан
+            # пользователю в драфте.
+            try:
+                async with self._session_factory() as session:
+                    await GenerationRunRepository(session).finish(
+                        prepared.run_id, status="cancelled"
+                    )
+                    await session.commit()
+            except Exception:
+                logger.exception("не удалось завершить отменённый run %s", prepared.run_id)
         finally:
             self._generations.pop(tg_chat_id, prepared.draft_id)
 
@@ -578,6 +624,7 @@ class GenerationService:
             return llm_messages, base_system_prompt, False, None
 
         summary_row = await ChatSummaryRepository(session).get_for_chat(chat_id)
+        uncovered_from = 0
         if summary_row is not None:
             # A15: вся непокрытая история, а не только хвост лимита
             history = await messages_repo.list_all(chat_id)
@@ -585,9 +632,22 @@ class GenerationService:
                 # A15: только что записанное user-сообщение не дублируем — оно
                 # добавляется отдельно как current.
                 history = [m for m in history if m.id != exclude_message_id]
+            if summary_row.covered_until_message_id is not None:
+                covered_id = str(summary_row.covered_until_message_id)
+                for index, message in enumerate(history):
+                    if str(message.id) == covered_id:
+                        uncovered_from = index + 1
+                        break
         if model_def.supports_images:
-            # A18: rehydration ВСЕГДА для image-capable моделей, не только при summary.
-            await self._rehydrate_images(history, bot)
+            # A18: rehydration для image-capable моделей; round4-P1 (perf) — качаем
+            # только хвост, который реально попадёт в контекст (uncovered-сегмент ∩
+            # последние keep_recent*2 сообщений), а не всю историю чата.
+            await self._rehydrate_images(
+                history,
+                bot,
+                uncovered_from=uncovered_from,
+                tail_messages=effective_settings.context_keep_recent * 2,
+            )
         # A13: builder на effective (DB) настройках текущего запроса, не env-снимке.
         builder = ContextBuilder(
             TokenBudgetManager(),
@@ -613,21 +673,44 @@ class GenerationService:
                 "⛔ Контекст слишком большой даже после свёртки. Начните новый чат (/new).",
             )
             return None
+        needs_compaction = built.needs_compaction
+        if summary_row is None and len(history) >= self._settings.recent_history_limit * 2:
+            # round4-P1 (A15): без сводки окно истории (recent_history_limit*2)
+            # заполнено — старший материал за окном невидим для модели и не
+            # триггерит compaction сам по себе. Первая компакция не запустится
+            # никогда — форсируем, чтобы не терять историю молча.
+            needs_compaction = True
         llm_messages = [*built.messages, {"role": "user", "parts": current_parts}]
-        return llm_messages, built.system_prompt, built.needs_compaction, built.max_output_tokens
+        return llm_messages, built.system_prompt, needs_compaction, built.max_output_tokens
 
-    async def _rehydrate_images(self, history: list[Message], bot: Bot) -> None:
+    async def _rehydrate_images(
+        self,
+        history: list[Message],
+        bot: Bot,
+        *,
+        uncovered_from: int = 0,
+        tail_messages: int = 20,
+    ) -> None:
         """Скачать bytes для image parts истории с telegram_file_id (transient).
 
         bytes в БД не хранятся; builder читает part.data_base64 (runtime-атрибут).
-        Ошибки/oversize — молча пропускаем (фото деградирует в плейсхолдер).
+        round4-P1: качаем только хвост, который реально попадёт в контекст
+        (uncovered-сегмент ∩ последние ``tail_messages`` сообщений), максимум
+        ``_MAX_REHYDRATED_IMAGES`` файлов за запрос — иначе фото-чаты качают
+        всю историю Telegram API на каждой генерации. Сетевые ошибки (aiohttp
+        из download_file, таймауты) не рвут генерацию — фото деградирует
+        в плейсхолдер.
         """
-        for message in history:
+        lo = max(uncovered_from, len(history) - tail_messages)
+        rehydrated = 0
+        for message in history[lo:]:
             for part in message.parts:
                 if part.type != "image" or not part.telegram_file_id:
                     continue
                 if getattr(part, "data_base64", None):
                     continue
+                if rehydrated >= _MAX_REHYDRATED_IMAGES:
+                    return
                 try:
                     tg_file = await bot.get_file(part.telegram_file_id)
                     if tg_file.file_path is None:
@@ -638,7 +721,12 @@ class GenerationService:
                     data = buf.read() if buf is not None else b""
                     if data and len(data) <= self._settings.photo_max_bytes:
                         part.data_base64 = base64.b64encode(data).decode("ascii")  # type: ignore[attr-defined]
-                except TelegramAPIError:
+                        rehydrated += 1
+                except Exception:
+                    # round4-P1: download_file идёт через raw aiohttp (stream_content)
+                    # и умеет поднимать ClientError/TimeoutError, НЕ завернутые в
+                    # TelegramAPIError. Фото деградирует в плейсхолдер, генерация
+                    # не рвётся.
                     logger.info("rehydrate image failed (file_id=%s)", part.telegram_file_id[:24])
 
     async def _stream_loop(
@@ -670,59 +758,57 @@ class GenerationService:
         attempt_ids: list[str] = []
         deadline = time.monotonic() + self._settings.max_generation_seconds
 
-        while True:
-            if time.monotonic() > deadline:
-                logger.warning("generation overall deadline reached (run %s)", prepared.run_id)
-                break
-            request = LLMRequest(
-                model=prepared.model_id,
-                messages=messages,
-                system_prompt=prepared.system_prompt,
-                thinking=prepared.thinking,
-                tools=llm_tools,
-                max_output_tokens=prepared.max_output_tokens,
-                metadata={"attempts": attempts, "attempt_ids": attempt_ids},
-                cancellation=cancellation,
-            )
-            try:
-                outcome = await self._consume(self._llm_stream(request), streamer, cancellation)
-            except (ProviderError, PoolExhaustedError) as exc:
-                logger.info("generation failed (run %s): %s", prepared.run_id, exc)
-                await streamer.fail(user_error_message(exc, prepared.model_display))
-                await self._save_failed(prepared, exc, attempts=attempts, attempt_ids=attempt_ids)
-                return None
-            except Exception as exc:
-                logger.exception("generation crashed (run %s)", prepared.run_id)
-                await streamer.fail(user_error_message(exc, prepared.model_display))
-                await self._save_failed(prepared, exc, attempts=attempts, attempt_ids=attempt_ids)
-                return None
+        try:
+            while True:
+                if time.monotonic() > deadline:
+                    logger.warning("generation overall deadline reached (run %s)", prepared.run_id)
+                    break
+                request = LLMRequest(
+                    model=prepared.model_id,
+                    messages=messages,
+                    system_prompt=prepared.system_prompt,
+                    thinking=prepared.thinking,
+                    tools=llm_tools,
+                    max_output_tokens=prepared.max_output_tokens,
+                    metadata={"attempts": attempts, "attempt_ids": attempt_ids},
+                    cancellation=cancellation,
+                )
+                outcome = await self._consume_round(request, streamer, prepared, cancellation)
+                if outcome is None:
+                    return None
 
-            if outcome.usage is not None:
-                usage_total = _sum_usage(usage_total or Usage(), outcome.usage)
-            if outcome.first_token_at is not None and first_token_at is None:
-                first_token_at = outcome.first_token_at
-            reasoning_chunks += outcome.reasoning_chunks
-            text_parts.append(outcome.text)
-            if outcome.cancelled:
-                cancelled = True
-                break
-            if not self._should_run_tools(outcome, tool_runner, iterations):
-                break
-            iterations += 1
-            assert tool_runner is not None  # гарантировано _should_run_tools
-            if await self._run_tool_round(
-                outcome,
-                prepared,
-                user,
-                permissions,
-                messages,
-                tool_runner,
-                tool_records,
-                cancellation,
-                llm_tools=llm_tools,
-            ):
-                cancelled = True
-                break
+                if outcome.usage is not None:
+                    usage_total = _sum_usage(usage_total or Usage(), outcome.usage)
+                if outcome.first_token_at is not None and first_token_at is None:
+                    first_token_at = outcome.first_token_at
+                reasoning_chunks += outcome.reasoning_chunks
+                text_parts.append(outcome.text)
+                if outcome.cancelled:
+                    cancelled = True
+                    break
+                if not self._should_run_tools(outcome, tool_runner, iterations):
+                    break
+                iterations += 1
+                assert tool_runner is not None  # гарантировано _should_run_tools
+                if await self._run_tool_round(
+                    outcome,
+                    prepared,
+                    user,
+                    permissions,
+                    messages,
+                    tool_runner,
+                    tool_records,
+                    cancellation,
+                    llm_tools=llm_tools,
+                ):
+                    cancelled = True
+                    break
+        except asyncio.CancelledError:
+            # round4-P1: Stop во время tool-раунда/между стримами — CancelledError
+            # больше не улетает из цикла наружу (раньше это теряло partial и
+            # оставляло run «running»). partial строится из накопленного, штатный
+            # путь generate() завершит его через _save_cancelled.
+            cancelled = True
 
         final = StreamOutcome(
             text="".join(text_parts),
@@ -734,6 +820,38 @@ class GenerationService:
         )
         # attempts (попытки пула Gemini) возвращаются вместе с outcome (A07)
         return final, tool_records, attempts, attempt_ids
+
+    async def _consume_round(
+        self,
+        request: LLMRequest,
+        streamer: DraftStreamer,
+        prepared: _PreparedGeneration,
+        cancellation: asyncio.Event,
+    ) -> StreamOutcome | None:
+        """Один запрос к LLM в цикле. None — ошибка (уже обработана: fail + failed)."""
+        try:
+            return await self._consume(self._llm_stream(request), streamer, cancellation)
+        except (ProviderError, PoolExhaustedError) as exc:
+            logger.info("generation failed (run %s): %s", prepared.run_id, exc)
+            await self._abort_round(prepared, streamer, exc, request)
+            return None
+        except Exception as exc:
+            logger.exception("generation crashed (run %s)", prepared.run_id)
+            await self._abort_round(prepared, streamer, exc, request)
+            return None
+
+    async def _abort_round(
+        self,
+        prepared: _PreparedGeneration,
+        streamer: DraftStreamer,
+        exc: BaseException,
+        request: LLMRequest,
+    ) -> None:
+        """Провал раунда: пользовательское сообщение + run failed (A07-поля из запроса)."""
+        await streamer.fail(user_error_message(exc, prepared.model_display))
+        attempts = list(request.metadata.get("attempts") or [])
+        attempt_ids = list(request.metadata.get("attempt_ids") or [])
+        await self._save_failed(prepared, exc, attempts=attempts, attempt_ids=attempt_ids)
 
     async def _run_tool_round(
         self,

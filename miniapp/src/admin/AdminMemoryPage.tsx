@@ -4,12 +4,9 @@ import { useAdminMemories } from "../api/hooks";
 import { Button, Chip, EmptyState, Input, Section, Spinner } from "../components";
 import { formatDateTime } from "../utils";
 
-const PAGE_SIZE = 50;
-
 export function AdminMemoryPage() {
   const [filter, setFilter] = useState("");
   const [debounced, setDebounced] = useState<number | null>(null);
-  const [limit, setLimit] = useState(PAGE_SIZE);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -24,16 +21,14 @@ export function AdminMemoryPage() {
     return () => clearTimeout(t);
   }, [filter]);
 
-  // При смене фильтра начинаем с первой страницы.
-  useEffect(() => {
-    setLimit(PAGE_SIZE);
-  }, [debounced]);
+  // round4-P1: offset-пагинация — смена фильтра меняет queryKey и автоматически
+  // сбрасывает догрузку на первую страницу (setLimit больше не нужен).
+  const memoriesQ = useAdminMemories({ telegram_user_id: debounced });
 
-  const memoriesQ = useAdminMemories({ telegram_user_id: debounced, limit });
-
-  const memories = memoriesQ.data?.memories ?? [];
-  const total = memoriesQ.data?.total ?? memories.length;
-  const hasMore = memories.length < total;
+  const pages = memoriesQ.data?.pages ?? [];
+  const memories = pages.flatMap((p) => p.memories);
+  const total = pages.length > 0 ? pages[pages.length - 1].total : memories.length;
+  const hasMore = memoriesQ.hasNextPage ?? false;
 
   return (
     <div className="page">
@@ -50,7 +45,15 @@ export function AdminMemoryPage() {
       </Section>
 
       {memoriesQ.isLoading && <Spinner center />}
-      {memoriesQ.error && <EmptyState icon="⚠️" text={errorMessage(memoriesQ.error)} />}
+      {/* round4-P1: при ошибке с накопленными страницами список не стираем. */}
+      {memoriesQ.error && memories.length === 0 && (
+        <EmptyState icon="⚠️" text={errorMessage(memoriesQ.error)} />
+      )}
+      {memoriesQ.error && memories.length > 0 && (
+        <div className="error-text" style={{ padding: 12 }}>
+          {errorMessage(memoriesQ.error)}
+        </div>
+      )}
       {!memoriesQ.isLoading && !memoriesQ.error && memories.length === 0 && (
         <EmptyState icon="🧠" text="Записей памяти не найдено." />
       )}
@@ -80,8 +83,8 @@ export function AdminMemoryPage() {
               <Button
                 size="small"
                 variant="secondary"
-                loading={memoriesQ.isFetching}
-                onClick={() => setLimit((v) => v + PAGE_SIZE)}
+                loading={memoriesQ.isFetchingNextPage}
+                onClick={() => void memoriesQ.fetchNextPage()}
               >
                 Загрузить ещё ({memories.length} из {total})
               </Button>

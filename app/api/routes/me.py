@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request
 
 from app.api.dependencies import CurrentUserDep, SessionDep, is_owner_user
 from app.config import Settings
+from app.db.repositories import ModelOverrideRepository
 from app.llm.capabilities import ModelDefinition
 from app.llm.registry import ModelRegistry
 from app.services.settings import get_probe_capabilities
@@ -74,9 +75,18 @@ async def list_models(
     thinking-опции из ModelDefinition.probe_required скрыты до runtime probe;
     свежие probe-записи (capability_probe:<model_id>, A27) фильтруют режимы
     по факту acceptance. probe_at — время последнего probe (для UI).
+
+    round4-P1: DB-override enabled=False (model_overrides, тот же источник,
+    что PUT /api/admin/models и _model_denial в generation.py) скрывает модель
+    и из пользовательского списка — иначе «мёртвый круг»: генерация отклоняет
+    отключённую админом модель, а Mini App продолжает предлагать её выбор.
     """
     _, permissions = current
     registry: ModelRegistry = request.app.state.registry
     probe = await get_probe_capabilities(session)
+    overrides = await ModelOverrideRepository(session).get_all()
     models = registry.filter_by_permissions(permissions.allowed_models)
-    return {"models": [_model_out(model, probe.get(model.model_id)) for model in models]}
+    # override=False скрывает модель; override=True не «включает» обратно
+    # registry-disabled — семантика та же, что в _model_denial (generation.py).
+    visible = [model for model in models if overrides.get(model.model_id) is not False]
+    return {"models": [_model_out(model, probe.get(model.model_id)) for model in visible]}
